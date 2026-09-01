@@ -9,12 +9,12 @@ A lightweight desktop sticky notes application for Windows, built with Delphi us
 - **Always on Top** - Keep notes visible above other windows
 - **Collapse** - Minimize to header only
 - **Lock** - Prevent accidental edits
-- **Global hotkeys** - `Ctrl+Alt+N` for new note, `Ctrl+Alt+F` for search
+- **Global hotkeys** - `Ctrl+Alt+N` for new note (`Ctrl+Alt+F` for search is **planned**, not yet wired to a search UI)
 - **Auto-save** - Debounced save (1 second default) on typing, moving, resizing
 - **Light/Dark theme** - Windows 10 / Windows 10 Dark styles
 - **Auto-start** - Launch with Windows
 - **Backup & Restore** - ZIP-based backups
-- **Multi-monitor support** - Notes stay on their monitor
+- **Multi-monitor support** - Partial (notes restore to their last monitor; no clamp-to-monitor logic yet)
 - **JSON storage** - One file per note, easy to sync with Git/Dropbox/OneDrive
 
 ## Architecture
@@ -49,6 +49,13 @@ msbuild src/StickyNotes.dproj /p:Config=Release /p:Platform=Win32
 
 Output: `src/Win32/Release/StickyNotes.exe`
 
+Quick `dcc32` builds (no MSBuild or RAD Studio command prompt needed — the scripts auto-locate `rsvars.bat` themselves via `DELPHI_ROOT`, or by probing Studio 23.0 → 22.0 → 21.0):
+
+```bat
+build.bat        REM canonical Win32 Debug build -> src\Win32\Debug\StickyNotes.exe
+build_tests.bat  REM DUnitX unit-test build -> tests\StickyNotes.Tests.exe
+```
+
 ## Data Location
 
 ```
@@ -63,10 +70,10 @@ Each note is an independent JSON file - corruption affects only one note, easy t
 
 ## Hotkeys
 
-| Action | Default |
-|--------|---------|
-| New Note | `Ctrl+Alt+N` |
-| Search Notes | `Ctrl+Alt+F` |
+| Action | Default | Status |
+|--------|---------|--------|
+| New Note | `Ctrl+Alt+N` | Implemented |
+| Search Notes | `Ctrl+Alt+F` | **Planned (Phase 4B)** - hotkey registered, but no search form yet; currently falls back to re-showing note windows |
 
 Configurable in Settings → Hotkeys.
 

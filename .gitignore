@@ -17,6 +17,14 @@
 *.bak
 *.~*
 
+# IDE project-local generated files
+*.local
+*.dsk
+*.dproj.local
+*.dpr.local
+*.stat
+*.ddp
+
 # Delphi IDE folders
 __history/
 __history
