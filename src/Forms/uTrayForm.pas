@@ -1,4 +1,4 @@
-unit uTrayForm;
+﻿unit uTrayForm;
 
 interface
 
@@ -8,7 +8,8 @@ uses
   Vcl.Graphics, Vcl.Controls, Vcl.Forms, Vcl.Dialogs, Vcl.ExtCtrls, Vcl.Menus,
   uNote, uNoteManager, uSettings, uTrayController, uSettingsController,
   uAutosaveService, uHotkeyService, uThemeService, uBackupService,
-  uStorage, uNoteForm, uNoteApplication, uNoteEditorContext;
+  uStorage, uNoteQuery, uNoteForm, uNoteApplication, uNoteEditorContext,
+  uNotesListForm;
 
 type
   TTrayForm = class(TForm)
@@ -37,6 +38,8 @@ type
     FApplication: TNoteApplication;
     // UI tracking
     FNoteForms: TList<TNoteForm>;
+    FNoteQuery: INoteQuery;
+    FNotesListForm: TNotesListForm;
 
     // NOTE: FTrayController is constructed but never shown (the dfm-wired
     // tiMain/pmTray is the active tray UI). Preserved as dead code.
@@ -56,6 +59,9 @@ type
     procedure OnHotkeyNewNote;
     procedure OnHotkeySearch;
     procedure CreateNoteForm(ANote: TNote);
+    function FindNoteForm(ANote: TNote): TNoteForm;
+    procedure ShowNoteWindow(ANote: TNote);
+    procedure ShowNotesList(AFocusSearch: Boolean);
     procedure OpenAllNotes;
     procedure CloseAllNotes;
     procedure SaveAllNotes;
@@ -90,6 +96,9 @@ begin
 
   // Initialize (loads settings, storage, notes)
   FApplication.Initialize;
+
+  // In-memory search (Phase 4B)
+  FNoteQuery := TNoteQuery.Create;
 
   // Create FTrayController (unused – see declaration comment)
   FTrayController := TTrayController.Create(
@@ -170,8 +179,7 @@ end;
 
 procedure TTrayForm.OnOpenNotesList(Sender: TObject);
 begin
-  // Show notes list form - for now just ensure all notes are visible
-  OpenAllNotes;
+  ShowNotesList(False);
 end;
 
 procedure TTrayForm.OnSettings(Sender: TObject);
@@ -248,6 +256,9 @@ end;
 procedure TTrayForm.OnNoteCreated(const ANote: TNote);
 begin
   CreateNoteForm(ANote);
+  // Keep an open note list in sync (the list only ever reads notes).
+  if FNotesListForm <> nil then
+    FNotesListForm.RefreshList;
 end;
 
 procedure TTrayForm.OnNoteChanged(const ANote: TNote);
@@ -270,6 +281,9 @@ begin
       Break;
     end;
   end;
+  // Keep an open note list in sync (the list only ever reads notes).
+  if FNotesListForm <> nil then
+    FNotesListForm.RefreshList;
 end;
 
 procedure TTrayForm.OnHotkeyNewNote;
@@ -279,8 +293,7 @@ end;
 
 procedure TTrayForm.OnHotkeySearch;
 begin
-  // TODO: Show search form
-  OnOpenNotesList(Self);
+  ShowNotesList(True);
 end;
 
 procedure TTrayForm.CreateNoteForm(ANote: TNote);
@@ -338,6 +351,54 @@ begin
   FApplication.AutosaveService.Flush;
 end;
 
+function TTrayForm.FindNoteForm(ANote: TNote): TNoteForm;
+var
+  Form: TNoteForm;
+begin
+  Result := nil;
+  for Form in FNoteForms do
+    if Form.Note = ANote then
+      Exit(Form);
+end;
+
+procedure TTrayForm.ShowNoteWindow(ANote: TNote);
+var
+  Form: TNoteForm;
+begin
+  if ANote = nil then
+    Exit;
+  // Reuse the existing note-form lifecycle: bring an already-open window to
+  // the front, otherwise create one via the single CreateNoteForm path.
+  Form := FindNoteForm(ANote);
+  if Form <> nil then
+  begin
+    if IsIconic(Form.Handle) then
+      ShowWindow(Form.Handle, SW_RESTORE);
+    Form.Show;
+    Form.BringToFront;
+    SetForegroundWindow(Form.Handle);
+  end
+  else
+    CreateNoteForm(ANote);
+end;
+
+procedure TTrayForm.ShowNotesList(AFocusSearch: Boolean);
+begin
+  if FNotesListForm = nil then
+  begin
+    // Owned by Self; hidden (caHide) on close and reused. The list form never
+    // owns notes - it reads via the manager and the INoteQuery abstraction.
+    FNotesListForm := TNotesListForm.CreateFor(Self, FApplication.NoteManager, FNoteQuery);
+    FNotesListForm.OnOpenNote := ShowNoteWindow;
+  end;
+  FNotesListForm.RefreshList;
+  if not FNotesListForm.Visible then
+    FNotesListForm.Show
+  else
+    FNotesListForm.BringToFront;
+  if AFocusSearch then
+    FNotesListForm.FocusSearch;
+end;
 procedure TTrayForm.miNewNoteClick(Sender: TObject);
 begin
   OnNewNote(Sender);

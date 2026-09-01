@@ -11,7 +11,8 @@ uses
   TSettingsTests in 'Models\TSettingsTests.pas',
   TJsonStorageTests in 'Models\TJsonStorageTests.pas',
   TAutosaveServiceTests in 'Models\TAutosaveServiceTests.pas',
-  TNoteApplicationTests in 'Models\TNoteApplicationTests.pas';
+  TNoteApplicationTests in 'Models\TNoteApplicationTests.pas',
+  TNoteQueryTests in 'Models\TNoteQueryTests.pas';
 
 var
   runner: ITestRunner;
