@@ -243,6 +243,38 @@ Phase 3B — JSON Schema Versioning: COMPLETE
     - [x] No migration framework (deferred); v0→v1 requires no field transformation
     - [x] INoteStorage unchanged; BackupService unchanged (tolerant parser)
     - [x] All 24 tests pass (19 existing + 5 new schema tests)
+Phase 3C — SQLite Readiness & Migration Design Analysis: COMPLETE (analysis only)
+    - [x] Current persistence boundary re-verified from source (TNoteManager → INoteStorage → TJsonStorage)
+    - [x] SQLite requirement assessment: no call site, no scheduled feature, no test requires SQLite
+    - [x] INoteStorage confirmed sufficient for a future TSQLiteStorage (no new methods needed)
+    - [x] JSON → SQLite conceptual field mapping documented
+    - [x] Two versioning systems distinguished: per-file JSON schemaVersion vs SQLite user_version PRAGMA
+    - [x] Migration strategy designed (B. First-run migration, read-only JSON, automatic rollback on partial failure)
+    - [x] Rollback strategy designed (impossible to corrupt JSON sources by design)
+    - [x] Backup/Restore strategy analyzed: TBackupService unchanged in this phase
+    - [x] Autosave impact verified: TAutosaveService is storage-agnostic, no changes required
+    - [x] Delphi 10.3 / Win32 decision points recorded (FireDAC vs alternatives, static vs dynamic)
+    - [x] Decision: B — Prepare for SQLite, defer implementation
+    - [x] Future roadmap defined (3D SQLite impl, 3E first-run migration, 3F backup adaptation)
+    - [x] No source files modified
+    - [x] All 24 tests still pass (no test changes)
+
+Phase 4A — Product Development Roadmap Analysis: COMPLETE (analysis only)
+    - [x] Full source-grounded feature inventory (no claims accepted from README alone)
+    - [x] Feature matrix compiled (see `docs/PHASE_4A_ANALYSIS.md` § "Feature Matrix")
+    - [x] User-facing workflow audit completed (tray, note CRUD, positioning, autosave, backup, hotkeys, settings, multi-monitor, themes, shutdown)
+    - [x] Technical-debt inventory by priority
+    - [x] Test coverage gap analysis
+    - [x] Dead-code review
+    - [x] Documentation-vs-source accuracy check
+    - [x] SQLite-trigger re-verification: NONE present → SQLite remains DEFERRED
+    - [x] Recommended next phase selected: **Phase 4B — Note list + in-memory search**
+    - [x] Smallest sensible Phase 4 roadmap (4B, 4C, 4D) drafted
+    - [x] No source files modified
+    - [x] No tests modified
+    - [x] Test baseline preserved: 24/24 PASS
+
+**Full Phase 4A analysis:** see `docs/PHASE_4A_ANALYSIS.md` (analysis only — no source/test changes; this file documents feature matrix, technical debt, test coverage gaps, architecture assessment, dead code, documentation accuracy, SQLite status, the recommended Phase 4B next step, the smallest-sensible Phase 4 roadmap (4B, 4C, 4D), and the manual smoke-test plan).
 Explicit dependency injection: USED PRAGMATICALLY
 DI container/framework: NOT PLANNED
 SQLite storage: NOT IMPLEMENTED (stub only)

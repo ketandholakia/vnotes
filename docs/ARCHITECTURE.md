@@ -359,15 +359,287 @@ INoteStorage
 
 No additional abstraction layers are needed. `INoteStorage` is sufficient.
 
+---
+
+## Phase 3C — SQLite Readiness & Migration Design Analysis
+
+This section is the Phase 3C analysis. **It is a design document, not an implementation.**
+
+### Current Persistence Architecture (verified from source)
+
+```text
+TNoteManager (Controllers/uNoteManager.pas)
+    │
+    ├── FStorage: INoteStorage
+    │       │
+    │       └── TJsonStorage (Storage/uJsonStorage.pas)   ← default and only live impl
+    │
+    │            └── one JSON file per note
+    │
+    └── FNotes: TObjectList<TNote>
+
+TNoteApplication (Application/uNoteApplication.pas)
+    │
+    └── FStorage := TJsonStorage.Create(FAppDataPath);     ← hard-coded
+```
+
+Confirmed in source:
+
+- `TNoteApplication.Create` line 69: `FStorage := TJsonStorage.Create(FAppDataPath);` — there is no setting-driven switch in the live code path.
+- `TStorageFactory.CreateStorage` (Storage/uStorage.pas) already supports the strings `'JSON'`, `'SQLITE'`, and defaults to JSON. It is **not** currently called by `TNoteApplication`.
+- `TSQLiteStorage` (Storage/uSQLiteStorage.pas) is a **stub** — all method bodies are TODO comments, `SaveNote` returns `False`, `LoadAllNotes` returns an empty list. It compiles only because no implementation is required.
+- `INoteStorage` is unchanged from Phase 2/3B and remains storage-agnostic.
+
+### SQLite Requirement Assessment (concrete evidence only)
+
+A search of the live codebase (excluding the two large `4neem` transcript artefacts that exist in the repo root) for SQLite / FTS / search / tags / categories / indexes returned:
+
+| Evidence | Location | Verdict |
+|---|---|---|
+| `TStorageType` enum with `stJson, stSQLite, stCloud` | `Models/uEnums.pas` | Plausible future option, not a current requirement. |
+| `TSQLiteStorage` stub | `Storage/uSQLiteStorage.pas` | Placeholder only; no callsite, no tests. |
+| README mentions `Ctrl+Alt+F` for "Search Notes" | `README.md` | Hotkey is registered, but **no search UI or backend exists**. |
+| Future roadmap: "5 Search, hotkeys, backup / 6 Rich text / 7 Cloud sync / 8 Plugins, reminders, tags" | `DEVELOPMENT_PLAN.md` | Explicitly labelled "future" milestones, not current. |
+| Phase 3A "Recommendation: JSON NOW → SQLITE LATER" | `docs/ARCHITECTURE.md` | Phase 3A concluded: not justified now. |
+
+**No call site, no user-facing feature, no test, and no scheduled milestone in the current development plan requires SQLite.** Tags, categories, full-text search, and large datasets appear only as "should be planned when" triggers in the existing recommendation table — they are not active requirements.
+
+### Current Data Scale (only what is documented)
+
+| Metric | Value | Source |
+|---|---|---|
+| Typical note count | "10-50 notes" (informal) | `docs/ARCHITECTURE.md` line 332 |
+| Practical JSON limit | "500+" notes (informal) | `docs/ARCHITECTURE.md` line 341 |
+| Maximum note count | **Not specified** | — |
+| Average note size | **Not specified** | — |
+| Measured startup time | **Not specified** | — |
+| Autosave debounce delay | 1000 ms (default) | `uAutosaveService.pas` line 19/32 |
+| Backup size | **Not specified** | — |
+| Search requirement | **None currently** | No search code, no FTS module, no UI |
+
+This phase does **not** invent benchmarks. If a decision later depends on scale, a measurement pass must be performed first.
+
+### INoteStorage Sufficiency Assessment
+
+| INoteStorage operation | JSON support | Future SQLite feasibility (conceptual) | Interface sufficient? |
+|---|---|---|---|
+| `SaveNote(const ANote: TNote): Boolean` | Yes — atomic write of one file | Yes — `INSERT OR REPLACE` | **Yes** |
+| `DeleteNote(const ANoteID: Int64): Boolean` | Yes — `TFile.Delete` | Yes — `DELETE FROM notes WHERE id = ?` | **Yes** |
+| `LoadAllNotes: TObjectList<TNote>` | Yes — directory scan + parse each | Yes — `SELECT * FROM notes` | **Yes** |
+| `GetNextID: Int64` | Yes — `FNextID` (max filename + 1) | Yes — `SELECT MAX(id) + 1 FROM notes` (or sequence) | **Yes** |
+| `Initialize` | Yes — `EnsureDirectories`, scan IDs | Yes — `CREATE TABLE IF NOT EXISTS`, load FNextID | **Yes** |
+| `Finalize` | Yes (no-op today) | Yes — close connection | **Yes** |
+
+**Conclusion:** The current 6-method interface is sufficient for a future `TSQLiteStorage`. **No new methods need to be added to `INoteStorage`.** If `BeginTransaction/Commit/Rollback` are ever required for batch operations, that is a separate decision and is not required for the current shape of `TNoteManager`.
+
+**Known gap (already documented in Phase 3A):** the interface intentionally has **no query/search methods.** If search is later added, the most natural extension is a separate interface (e.g. `INoteQuery`) rather than overloading `INoteStorage`.
+
+### JSON → SQLite Conceptual Field Mapping
+
+For the currently persisted v1 schema (post-Phase 3B):
+
+| JSON field | JSON type | `TNote` property | Conceptual SQLite column | Conceptual SQLite type |
+|---|---|---|---|---|
+| `schemaVersion` (JSON only) | Integer (1) | n/a | n/a (replaced by SQLite `user_version` PRAGMA, see below) | — |
+| `ID` | Integer | `ID: Int64` | `id` | `INTEGER PRIMARY KEY` |
+| `Title` | String | `Title: string` | `title` | `TEXT` |
+| `Content` | String | `Content: string` | `content` | `TEXT` |
+| `Color` | Integer (0..7) | `Color: TNoteColor` | `color` | `INTEGER` |
+| `Left` | Integer | `Left: Integer` | `pos_left` | `INTEGER` |
+| `Top` | Integer | `Top: Integer` | `pos_top` | `INTEGER` |
+| `Width` | Integer | `Width: Integer` | `pos_width` | `INTEGER` |
+| `Height` | Integer | `Height: Integer` | `pos_height` | `INTEGER` |
+| `AlwaysOnTop` | Boolean | `AlwaysOnTop: Boolean` | `always_on_top` | `INTEGER` (0/1) |
+| `Collapsed` | Boolean | `Collapsed: Boolean` | `collapsed` | `INTEGER` (0/1) |
+| `Locked` | Boolean | `Locked: Boolean` | `locked` | `INTEGER` (0/1) |
+| `CreatedAt` | String (ISO 8601) | `CreatedAt: TDateTime` | `created_at` | `TEXT` (ISO 8601) — preserves JSON semantics |
+| `UpdatedAt` | String (ISO 8601) | `UpdatedAt: TDateTime` | `updated_at` | `TEXT` (ISO 8601) — preserves JSON semantics |
+
+The Phase 3B `schemaVersion` field is **not** stored as a per-row column in SQLite. Instead, the SQLite database itself carries a single schema-version integer (see below).
+
+### JSON Schema Version vs SQLite Database Schema Version
+
+These are **two independent versioning systems** and must not be conflated.
+
+```text
+JSON schema version          →  per-file integer ("schemaVersion": 1)
+                                describes the SHAPE of a single note's JSON
+
+SQLite database schema ver  →  database-wide integer (e.g. PRAGMA user_version = 1)
+                                describes the SHAPE of the database tables
+```
+
+Why they are separate:
+- A SQLite database can contain rows imported from many JSON files with different per-file `schemaVersion` values (v0, v1). The DB schema is the contract for what columns/types exist, not what each row's provenance is.
+- Per-file `schemaVersion` in JSON evolved to track field changes over time. In SQLite, column changes are tracked by `ALTER TABLE` and the DB-level schema version.
+- If a future DB column rename is needed, that is a DB-level migration (DB schema v1 → v2) independent of the source JSON's per-file version.
+
+The conceptual mapping is therefore:
+
+```text
+JSON file (schemaVersion = 0 or 1)     →   SQLite DB (user_version = 1)
+```
+
+Both can be v1 at the same time, but they are different numbers in different places, evolved by different mechanisms.
+
+### Migration Strategy (conceptual only — not implemented)
+
+Recommended approach: **B. First-run migration**, with strict non-destructive guarantees.
+
+```text
+Application startup
+    ↓
+Detect: any *.json files in <base>\notes\ AND notes.db does NOT exist
+    ↓
+Run JSON → SQLite import
+    ↓
+   - Open notes.db (or notes.db.tmp)
+   - Create schema at DB schema v1
+   - For each *.json in notes\:
+       * Read file (TJsonStorage.JsonToNote)
+       * If success → INSERT into notes
+       * If legacy/v0 → row imported using same reader as live
+       * If corrupt or future-schema → SKIP, log warning, KEEP original file
+   - Run integrity check / row count
+   - Close DB
+    ↓
+On full success: mark migration done (e.g. settings flag)
+On partial failure: ABORT, rename notes.db to notes.db.failed-yyyymmdd_hhnnss,
+                    keep all *.json files untouched
+    ↓
+Subsequent startups use SQLite
+```
+
+**Decision: do not use Dual-write (option C).** Dual-write is the highest-risk option (two systems can diverge) and is only justified when users must be able to roll back the storage engine at runtime — VNotes has no such requirement. Option A (offline tool) adds scope and is not needed for a single-user desktop app.
+
+Key safety invariants (no code today, just a contract):
+
+| Scenario | Required behavior |
+|---|---|
+| One JSON file is corrupt | Log warning, skip row, continue import. Do not abort the whole migration. |
+| One JSON file is unsupported/future version | Log warning, skip row, continue import. Do not touch the file. |
+| SQLite insert fails halfway through | Abort import, rename notes.db to `*.failed-…`, keep all JSON files, surface a user-visible error. JSON files remain the source of truth. |
+| Resumability | Optional: track imported IDs in a side file to allow resume. Recommended but not required because full re-import is fast at current scale. |
+| Rollback | Implicit: if SQLite is absent or marked as not-yet-fully-migrated, the app falls back to JSON. The user is never locked out of their data. |
+| When is a JSON file considered "migrated"? | Only when it has been successfully INSERTed and the overall migration has committed. Until that point it is never deleted or modified. |
+
+### Rollback Strategy (conceptual)
+
+Because the recommended approach is **B (first-run migration) with no source destruction**, rollback is trivial by design:
+
+```text
+100 notes exist (JSON)
+   70 inserted into SQLite
+    1 fails
+        ↓
+    abort migration
+    ↓
+    rename notes.db → notes.db.failed-2026-09-01-120000
+    leave all 100 *.json files untouched
+    app continues to use JSON
+```
+
+There is **no scenario** in which a SQLite migration failure can corrupt the original JSON files. The JSON files are treated as read-only inputs throughout the migration. **This is the single most important safety property of the future migration design.**
+
+### Backup/Restore Strategy (current vs future)
+
+| Aspect | Current (JSON) | Future (with SQLite) |
+|---|---|---|
+| What is backed up | Notes (one file each) + `settings.ini` | Notes DB file + `settings.ini` + JSON files (kept for rollback window) |
+| Mechanism | `System.Zip` of a temp dir | Same `System.Zip`, but contents differ |
+| Restore | Parse each JSON → `AddNote` | Decide: restore-by-DB (drop-in file) OR restore-by-JSON (re-parse). Decision deferred. |
+| Code that must not change in this phase | `TBackupService` | None additional, but a SQLite-aware variant may exist later |
+
+**For Phase 3C: `TBackupService` is unchanged.** During the rollback window the JSON files remain the source of truth, so today's ZIP format continues to work. Any SQLite-aware backup is a Phase 3E concern.
+
+### Autosave Impact (verified from source)
+
+`TAutosaveService` is **storage-agnostic**:
+
+- Its `OnSave: TProc<TNote>` callback is assigned by `TNoteApplication.Create` to `FNoteManager.SaveNote` (line 78-81 of `uNoteApplication.pas`).
+- `TNoteManager.SaveNote` calls `FStorage.SaveNote(ANote)`.
+- The service holds a `TDictionary<Int64, TNote>` of pending notes and a `TTimer`. It knows nothing about file paths, SQL, or storage backends.
+
+**Conclusion: `TAutosaveService` would require zero changes** if the storage implementation switched from `TJsonStorage` to a future `TSQLiteStorage`. The same is true for `INoteEditorContext` — it never references storage.
+
+### Performance (no fabricated numbers)
+
+| Operation | Current complexity | File-per-note concern? |
+|---|---|---|
+| `LoadAllNotes` | O(n) file reads, each parsed | Yes — scales linearly with note count. Not a problem at 10-50 notes. |
+| `SaveNote` | O(1) — single file rewrite with atomic move | No |
+| `DeleteNote` | O(1) — single file delete | No |
+| `Backup` | O(n) — zip all files | Yes — scales linearly |
+| `Restore` | O(n) — parse + re-insert each JSON | Yes — scales linearly |
+| Future search | O(n) full scan | Yes — biggest single motivator for SQLite, but no search exists today |
+
+**No benchmarks exist in this repository.** The numbers above are algorithmic complexity, not measured throughput. If a future phase makes a performance claim, it must be backed by a benchmark, not by this analysis.
+
+### Delphi 10.3 Rio / Win32 Considerations (decisions, not actions)
+
+When (and if) `TSQLiteStorage` is implemented, the following decisions must be made. **None of them is resolved in this phase.** They are recorded here so that the future phase does not start from zero.
+
+| Concern | Options to evaluate | Notes |
+|---|---|---|
+| SQLite engine | `sqlite3.dll` (dynamic) **or** statically linked source amalgamation | Win32 deployment currently ships zero extra DLLs (only `System.Zip` + built-in `System.JSON`). Adding a DLL is a deployment change. |
+| Delphi component / API | FireDAC `TFDConnection`+`TFDQuery` (Embarcadero, available in Delphi 10.3) **or** `mORMot` / `ZeosLib` / direct sqlite3.pas binding | No FireDAC or third-party SQLite unit is currently in any `uses` clause. Introducing one is a dependency change. |
+| Static vs dynamic | Trade-off: simpler deployment (static) vs smaller EXE (dynamic) | Must be decided before code is written. |
+| Unicode | All string columns are `TEXT`; encoding is UTF-8 by default in modern SQLite. TNote fields are Delphi `string` (UTF-16). | Conversion at the `TNote` ↔ SQL boundary. |
+| Transactions | Single-statement per save is sufficient for current model. Batch migration uses one transaction. | No change required to `INoteStorage` for single-statement mode. |
+| Threading | App is single-threaded on VCL main thread. SQLite connection should be created and used only on the main thread. | No change to threading model. |
+| Database file location | `<base>\notes.db` (matches the stub's choice). | Coexists with `notes\` folder during the rollback window. |
+| User_version PRAGMA | Used for SQLite-side schema versioning (see Versioning section). | Independent of the per-file JSON `schemaVersion`. |
+
+### Decision Gate
+
+```text
+Decision: B — Prepare for SQLite, but defer implementation.
+```
+
+**Why B, not C:** no current feature, call site, scheduled milestone, or test requires SQLite. The existing JSON storage is documented as adequate for the current scale, the schema is now properly versioned (Phase 3B), and no new requirement has emerged. Implementing SQLite now would add a FireDAC dependency, deployment complexity, and migration risk **without** removing any current pain point.
+
+**Why not A:** option A ("stay JSON forever") would lock out legitimate future needs (search, scale, tags). Option B is the same as A today while keeping the door open: the abstraction is already in place, the conceptual design is now documented, and Phase 3D can start with a clear specification the moment a real trigger (FTS5 search, 500+ notes, tags/categories) is requested.
+
+**Why B includes no JSON-side improvements:** this phase found no concrete JSON bug or limitation that would justify scope creep. The schema versioning from Phase 3B is sufficient; no migration framework, no validation framework, no manifest, and no startup optimization is justified by current evidence. Any such improvement must be motivated by a real measurement or a real defect, not by speculative future need.
+
+### Target Architecture (current recommendation)
+
+```text
+TNoteManager
+      │
+      ▼
+INoteStorage               (unchanged 6-method interface)
+      │
+      ├── TJsonStorage     (current, default — keeps working)
+      │
+      └── TSqliteStorage   (NOT BUILT — designed for when a real trigger exists)
+```
+
+**No additional abstraction layer is created.** `INoteStorage` is sufficient.
+
+### Future Roadmap (smallest sensible)
+
+These phases are not assumed — each must be triggered by concrete evidence.
+
+| Phase | Trigger | Scope |
+|---|---|---|
+| **Phase 3C** | This document | SQLite readiness analysis, migration design. **COMPLETE** |
+| **Phase 3D — SQLite Implementation** | A real trigger: FTS5 search becomes a feature requirement, OR note count regularly exceeds ~500, OR tags/categories are added to the development plan | Build `TSQLiteStorage` behind the unchanged `INoteStorage`; no changes to `TNoteManager`, `TNoteApplication`, `INoteEditorContext`, `TAutosaveService`, or `TBackupService`. Decide FireDAC vs alternatives, static vs dynamic linking, schema column types. Add tests for CRUD + schema versioning. |
+| **Phase 3E — First-Run Migration** | After Phase 3D is shippable | Implement the read-only JSON → SQLite importer with the rollback contract above. User-confirmed one-time migration. JSON files retained for one full release cycle, then optionally archived. |
+| **Phase 3F — Backup/Restore Adaptation** | After Phase 3E | Decide whether backups zip the SQLite DB or continue to re-export to per-file JSON. Most likely: a SQLite-aware `TBackupService` that zips `notes.db` + `settings.ini`. |
+
+If none of the Phase 3D triggers materialize, the application stays on `TJsonStorage` indefinitely. The Phase 3C design is intentionally cheap to leave on the shelf.
+
 ### Future Roadmap
 
 | Phase | Task | Description |
 |-------|------|-------------|
 | Phase 3A | Persistence Architecture Analysis | COMPLETE |
 | Phase 3B | JSON Schema Versioning | COMPLETE — schemaVersion field, legacy v0 reader, future/invalid rejection |
-| Phase 3C | SQLite Storage Implementation | Implement TSqliteStorage with FireDAC |
-| Phase 3D | Migration Infrastructure | JSON → SQLite migration tooling, dual-write |
-| Phase 3E | Backup/Restore Adaptation | Update backup for both JSON and SQLite backends |
+| Phase 3C | SQLite Readiness & Migration Design Analysis | COMPLETE — Decision B (defer). Full design in § "Phase 3C" below. |
+| Phase 3D | SQLite Implementation | NOT STARTED (triggered by real FTS5/scale/tags need) |
+| Phase 3E | First-Run JSON → SQLite Migration | NOT STARTED (after 3D) |
+| Phase 3F | Backup/Restore Adaptation | NOT STARTED (after 3E) |
 | `UpdatedAt` | String (ISO 8601) | `UpdatedAt: TDateTime` | Yes | Now |
 
 #### Versioning (Phase 3B — COMPLETE)
@@ -419,7 +691,8 @@ Cross-note atomicity: NO — each note save is individually atomic. No transacti
 | Phase 2C — Application/UI event boundary | COMPLETE |
 | Phase 3A — Persistence Architecture Analysis | COMPLETE |
 | Phase 3B — JSON Schema Versioning | COMPLETE |
-| Phase 3C — SQLite Storage Implementation | NOT STARTED |
+| Phase 3C — SQLite Readiness & Migration Design Analysis | COMPLETE |
+| Phase 3D — SQLite Implementation | NOT STARTED (deferred — see Phase 3C roadmap) |
 
 ## Dependency Injection Status
 
