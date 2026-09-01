@@ -171,21 +171,22 @@ tests/
 
 ## Next Recommended Task
 
-**Phase 2 — Architecture — is now complete**. 
+**Phase 3A — Persistence Architecture Analysis — is now complete**.
 
 - 19/19 DUnitX tests compile and execute ✅
 - Application builds with 0 errors ✅
-- TNoteApplication owns all services; TTrayForm is a thin UI/tray form ✅
-- INoteEditorContext decouples TNoteForm from service implementations ✅
-- OnClosed event fixes the dangling FNoteForms reference ✅
-- Explicit dependency injection used pragmatically; no DI container ✅
+- Full persistence flow documented (create, edit, autosave, startup, backup, restore) ✅
+- INoteStorage confirmed as a clean, storage-agnostic abstraction ✅
+- JSON format is NOT versioned — schema versioning recommended as Phase 3B ✅
+- Recommendation: JSON NOW → SQLITE LATER (when search/scale requires it) ✅
+- Roadmap defined through Phase 3E ✅
 
 **Next steps**:
 
 1. **Runtime verification** (in Delphi IDE if available): Execute the compiled application and verify the full note create/edit/delete/close/restart cycle
-2. **Proceed to Phase 3A**: Persistence Architecture Analysis — evaluate JSON storage, SQLite, schema versioning, and migration strategy
+2. **Proceed to Phase 3B**: JSON Schema Versioning — add schema version field, implement read-compatibility
 
-**Immediate next task**: Phase 3A — Persistence Architecture Analysis
+**Immediate next task**: Phase 3B — JSON Schema Versioning
 
 ---
 
@@ -226,6 +227,12 @@ Phase 2 — Architecture: COMPLETE
     - [x] FNoteForms ownership analysis complete
     - [x] TNoteForm.OnClosed event added to fix dangling reference bug
     - [x] All 19 tests pass
+Phase 3A — Persistence Architecture Analysis: COMPLETE
+    - [x] Full persistence flow documented
+    - [x] INoteStorage confirmed as clean abstraction
+    - [x] JSON format versioning gap identified
+    - [x] Recommendation: JSON NOW → SQLITE LATER
+    - [x] Roadmap defined through Phase 3E
 Explicit dependency injection: USED PRAGMATICALLY
 DI container/framework: NOT PLANNED
 SQLite storage: NOT IMPLEMENTED (stub only)
