@@ -412,7 +412,54 @@ Root cause (confirmed against Delphi 12 RTL source): `Winapi.Windows.pas` does N
 | `README.md` | Search hotkey marked Planned (Phase 4B); multi-monitor marked Partial; build section self-configuring toolchain |
 | `docs/DEVELOPMENT_PLAN.md` | This Phase 4A.5 entry (now COMPLETE + VALIDATED) |
 
+## Phase 4B - Note List + In-Memory Search - COMPLETE + VALIDATED (2026-09-02)
+
+> **Status:** **COMPLETE + VALIDATED** - `INoteQuery` abstraction + DUnitX coverage landed first, then the `TNotesListForm` UI on top. Application and test builds pass; **38/38 tests** (24 baseline + 14 new query tests); msbuild `.dproj` build passes. **No commit made** (awaiting review).
+
+### What Changed
+
+- [x] **`src/Storage/uNoteQuery.pas` (new)** - `INoteQuery.Search(AQuery, ANotes: TObjectList<TNote>): TObjectList<TNote>` implemented by `TNoteQuery`. Case-insensitive substring match across `Title` + `Content` (`ContainsText`); `Trim`med query; empty/blank query returns ALL notes; nil source safe. Deterministic order: `UpdatedAt` descending, tie-broken by `ID` descending. **Ownership contract (documented on the interface):** the query never owns notes - every result/temporary list is created `OwnsObjects := False`; search never mutates notes or touches persistence.
+- [x] **`tests/Models/TNoteQueryTests.pas` (new)** - 14 DUnitX tests: empty collection, empty query, exact/partial title, case-insensitive, content match, no match, multiple matches, no-mutation, **ownership safety** (result `OwnsObjects = False`; freeing results leaves manager-owned notes alive), whitespace tolerance, nil source, plus 2 ordering tests (most-recent-first; `ID`-desc tie-break) using explicit `UpdatedAt` stamps.
+- [x] **`src/Forms/uNotesListForm.pas` + `.dfm` (new)** - search `TEdit` + `TListView` (Title/Modified, RowSelect) + Open button. `CreateFor(AOwner, TNoteManager, INoteQuery)`; `RefreshList` builds an `OwnsObjects := False` snapshot from the manager, runs the query, stores `TNote` pointers in `ListView.Data` (display-only); Enter/Esc/DblClick handling; `caHide` on close (form reused, never owns notes); `OnOpenNote: TOpenNoteEvent` (`of object`, matching `TNoteEvent` conventions).
+- [x] **`src/Forms/uTrayForm.pas`** - `FNoteQuery := TNoteQuery.Create` at startup; lazy-created `FNotesListForm`; `ShowNotesList(AFocusSearch)`; new `FindNoteForm`/`ShowNoteWindow` (bring an already-open note window to front/restore it, else reuse the single `CreateNoteForm` path - no duplicated note lifecycle); tray menu "Open Notes List" now shows the list; **`Ctrl+Alt+F` (`OnHotkeySearch`) opens the list and focuses+selects the search box** (replaces the 4A.5 TODO stub); list resyncs (`RefreshList`) on note created/deleted.
+- [x] **Registrations** - `StickyNotes.dpr` (+2 units), `StickyNotes.dproj` (+2 `<Compile>`, +1 `<FormResource>`), `tests/StickyNotes.Tests.dpr` (+fixture).
+
+### Design Notes / Deviations
+
+- Result ordering lives in the **query layer**, not the form - single source of truth; subsumes the action plan's "sort in list form" item.
+- `OnOpenNote` uses an `of object` event type instead of `TProc<TNote>` to match existing codebase conventions (`TNoteEvent`).
+- No sorting/grouping/tagging, no persistence changes, no `TNoteManager` modifications.
+
+### Validation Results (2026-09-02, plain shell - no RAD Studio prompt)
+
+| # | Check | Result |
+|---|-------|--------|
+| 1 | `build.bat` (Win32 Debug, Delphi 12 / dcc32 v36.0) | **PASS** - exit 0, 4750 lines, 0 errors (only pre-existing hints) |
+| 2 | `build_tests.bat` + run | **PASS** - BUILD SUCCESSFUL; **Tests: 38 Found / 38 Passed / 0 Failed / 0 Errored / 0 Leaked / 0 Ignored** (24 baseline + 14 new) |
+| 3 | `msbuild src\StickyNotes.dproj /t:Build /p:Config=Debug /p:Platform=Win32` | **PASS** - exit 0, 0 errors; validates the new dproj registrations |
+| 4 | Full build -> `git status` | **CLEAN** - no build artifacts reappeared; msbuild-regenerated `src/StickyNotes.res` restored via `git checkout` (known cgrc behavior from 4A.5) |
+
+### Manual Verification Still Recommended (VCL behavior, not unit-testable here)
+
+Hotkey `Ctrl+Alt+F` focus/select-all; open list from tray menu; typing filters; clearing restores all; opening an already-open note brings its window to front instead of duplicating; deleting a note while the list is open resyncs the list; app shutdown with the list open.
+
+### Files Changed During Phase 4B
+
+| File | Change |
+|------|--------|
+| `src/Storage/uNoteQuery.pas` | **Created** - `INoteQuery`/`TNoteQuery` (ownership contract documented) |
+| `tests/Models/TNoteQueryTests.pas` | **Created** - 14 DUnitX tests incl. ownership-safety |
+| `src/Forms/uNotesListForm.pas` + `.dfm` | **Created** - note list/search window |
+| `src/Forms/uTrayForm.pas` | Query instance, list-form lifecycle, hotkey + tray-menu wiring, note create/delete resync, `FindNoteForm`/`ShowNoteWindow`/`ShowNotesList` |
+| `src/StickyNotes.dpr`, `src/StickyNotes.dproj` | Register `uNoteQuery`, `uNotesListForm` (+ dfm resource) |
+| `tests/StickyNotes.Tests.dpr` | Register `TNoteQueryTests` |
+| `docs/DEVELOPMENT_PLAN.md` | This Phase 4B entry |
+
+### Out-of-Scope Observation (NOT fixed, flagged for a later phase)
+
+While integrating, a **suspected pre-existing double-open on new notes** was noticed: `TTrayForm.OnNewNote` calls `NoteManager.CreateNote` (which fires `OnNoteCreated` -> `CreateNoteForm`) and *then* calls `CreateNoteForm(Note)` explicitly again - likely opening two windows per new note. Unverified at runtime; predates Phase 4B; left untouched per scope guardrails.
+
 ---
 
 *Document created: 2026-08-31*
-*Last updated: 2026-09-01*
+*Last updated: 2026-09-02*

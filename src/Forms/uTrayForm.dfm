@@ -11,16 +11,14 @@ object TrayForm: TTrayForm
   Font.Name = 'Segoe UI'
   Font.Style = []
   Position = poDesigned
-  Visible = False
   OnCreate = FormCreate
   OnDestroy = FormDestroy
-  PixelsPerInch = 96
   TextHeight = 15
   object tiMain: TTrayIcon
     Hint = 'Sticky Notes'
     Visible = True
     OnDblClick = tiMainDblClick
-    Left = 40
+    Left = 48
     Top = 24
   end
   object pmTray: TPopupMenu

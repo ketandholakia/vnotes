@@ -71,7 +71,6 @@
     <Compile Include="Storage\uStorage.pas" />
     <Compile Include="Storage\uJsonStorage.pas" />
     <Compile Include="Storage\uSQLiteStorage.pas" />
-    <Compile Include="Storage\uNoteQuery.pas" />
     <Compile Include="Services\uAutosaveService.pas" />
     <Compile Include="Services\uHotkeyService.pas" />
     <Compile Include="Services\uStartupService.pas" />
@@ -96,16 +95,12 @@
     <Compile Include="Forms\uAboutForm.pas">
       <Form>Form</Form>
     </Compile>
-    <Compile Include="Forms\uNotesListForm.pas">
-      <Form>Form</Form>
-    </Compile>
   </ItemGroup>
   <ItemGroup>
     <FormResource Include="Forms\uNoteForm.dfm" />
     <FormResource Include="Forms\uTrayForm.dfm" />
     <FormResource Include="Forms\uSettingsForm.dfm" />
     <FormResource Include="Forms\uAboutForm.dfm" />
-    <FormResource Include="Forms\uNotesListForm.dfm" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Resources\StickyNotes.rc" />
