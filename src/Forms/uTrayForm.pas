@@ -8,7 +8,7 @@ uses
   Vcl.Graphics, Vcl.Controls, Vcl.Forms, Vcl.Dialogs, Vcl.ExtCtrls, Vcl.Menus,
   uNote, uNoteManager, uSettings, uTrayController, uSettingsController,
   uAutosaveService, uHotkeyService, uThemeService, uBackupService,
-  uStorage, uNoteForm, uNoteApplication;
+  uStorage, uNoteForm, uNoteApplication, uNoteEditorContext;
 
 type
   TTrayForm = class(TForm)
@@ -42,6 +42,7 @@ type
     // tiMain/pmTray is the active tray UI). Preserved as dead code.
     FTrayController: TTrayController;
     procedure SetupHotkeys;
+    procedure NoteFormClosed(Sender: TObject);
     procedure OnNewNote(Sender: TObject);
     procedure OnOpenNotesList(Sender: TObject);
     procedure OnSettings(Sender: TObject);
@@ -125,6 +126,15 @@ begin
   FTrayController.Free;
   FApplication.Free;   // TNoteApplication.Destroy calls Shutdown internally
   FNoteForms.Free;
+end;
+
+procedure TTrayForm.NoteFormClosed(Sender: TObject);
+var
+  Form: TNoteForm;
+begin
+  Form := Sender as TNoteForm;
+  Form.OnClosed := nil; // prevent recursion
+  FNoteForms.Remove(Form);
 end;
 
 procedure TTrayForm.SetupHotkeys;
@@ -276,13 +286,16 @@ end;
 procedure TTrayForm.CreateNoteForm(ANote: TNote);
 var
   Form: TNoteForm;
+  Ctx: INoteEditorContext;
 begin
-  Form := TNoteForm.CreateNote(
-    Self, ANote,
+  Ctx := TNoteEditorContext.Create(
     FApplication.NoteManager,
     FApplication.AutosaveService,
     FApplication.ThemeService,
     FApplication.Settings);
+
+  Form := TNoteForm.CreateNote(Self, ANote, Ctx);
+  Form.OnClosed := NoteFormClosed;
   FNoteForms.Add(Form);
   Form.Show;
 end;

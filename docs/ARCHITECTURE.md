@@ -1,235 +1,188 @@
-# Sticky Notes - Architecture Documentation
+# VNotes Architecture
 
-## Overview
-
-A lightweight desktop sticky notes application for Windows, built with Delphi using a clean, modular architecture that separates concerns across Forms, Controllers, Models, Storage, Services, and Utilities.
-
-## Architecture
+## Application Layer
 
 ```
-src/
-├── Forms/              # UI Layer (Views)
-│   ├── uNoteForm.pas       # Individual note window
-│   ├── uTrayForm.pas       # System tray application
-│   ├── uSettingsForm.pas   # Settings dialog
-│   └── uAboutForm.pas      # About dialog
-│
-├── Controllers/        # Business Logic Layer
-│   ├── uNoteManager.pas    # Core note management (CRUD, events)
-│   ├── uTrayController.pas # Tray menu handling
-│   └── uSettingsController.pas # Settings persistence & application
-│
-├── Models/             # Data Models
-│   ├── uNote.pas           # TNote class with properties
-│   ├── uSettings.pas       # TSettings class with INI persistence
-│   └── uEnums.pas          # Enumerations (colors, storage types)
-│
-├── Storage/            # Data Persistence Abstraction
-│   ├── uStorage.pas        # INoteStorage interface + factory
-│   ├── uJsonStorage.pas    # JSON file-per-note implementation
-│   └── uSQLiteStorage.pas  # SQLite implementation (stub)
-│
-├── Services/           # Cross-cutting Concerns
-│   ├── uAutosaveService.pas    # Debounced auto-save (1s default)
-│   ├── uHotkeyService.pas      # Global hotkey registration
-│   ├── uStartupService.pas     # Auto-start registry management
-│   ├── uThemeService.pas       # Light/Dark theme management
-│   └── uBackupService.pas      # ZIP-based backup/restore
-│
-├── Utils/              # Shared Utilities
-│   ├── uWindowUtils.pas      # Borderless window handling (WM_NCHITTEST)
-│   ├── uJsonUtils.pas        # JSON helper methods
-│   ├── uColorUtils.pas       # Color manipulation helpers
-│   └── uMonitorUtils.pas     # Multi-monitor support
-│
-├── Resources/          # Images, icons, manifests
-│
-└── StickyNotes.dpr     # Main entry point
+StickyNotes.dpr (entry point)
+    └── TTrayForm (thin UI / tray form)
+        ├── TNoteApplication (application orchestration)
+        │     ├── TNoteManager (note orchestration)
+        │     ├── TSettingsController (owns TSettings)
+        │     ├── TAutosaveService (debounced autosave)
+        │     ├── THotkeyService (global hotkeys)
+        │     ├── TThemeService (light/dark themes)
+        │     ├── TBackupService (ZIP backup/restore)
+        │     └── INoteStorage → TJsonStorage (persistence)
+        │
+        ├── TNoteEditorContext (implements INoteEditorContext)
+        ├── FNoteForms: TList<TNoteForm> (UI tracking)
+        └── FTrayController (dead code, documented)
 ```
 
-## Key Design Decisions
+## Note Form Dependency Boundary
 
-### 1. Storage Abstraction (INoteStorage)
-- Interface-based design allows swapping storage backends
-- JSON implementation: one file per note (`%APPDATA%\StickyNotes\notes\####.json`)
-- Easy Git/Dropbox/OneDrive sync - no database lock contention
-- Corruption affects single note only
-- No FireDAC/SQLite DLL dependencies
-
-### 2. Note Manager as Central Hub
-- `TNoteManager` owns all note instances
-- Events: `OnNoteCreated`, `OnNoteChanged`, `OnNoteDeleted`
-- No form directly saves files - all persistence goes through manager
-- Enables future features: search, tags, cloud sync without UI changes
-
-### 3. Autosave Service
-- Debounced save (default 1 second) via `TTimer`
-- Restarts timer on each keystroke/resize/move
-- Prevents excessive disk writes
-
-### 4. Borderless Windows with Native Behavior
-- `WM_NCHITTEST` returns `HTCAPTION`, `HTLEFT`, `HTRIGHT`, etc.
-- Windows handles all dragging/resizing natively - no flicker
-- Custom caption area with buttons (close, pin, collapse, lock, color)
-
-### 5. Event System for Extensibility
-```pascal
-type
-  TNoteEvent = procedure(const ANote: TNote) of object;
-
-  TNoteManager = class
-  public
-    OnNoteCreated: TNoteEvent;
-    OnNoteChanged: TNoteEvent;
-    OnNoteDeleted: TNoteEvent;
-  end;
 ```
-Allows plugins/services to subscribe without modifying core code.
-
-## Building
-
-### Requirements
-- Delphi 11 Alexandria or later (VCL)
-- Windows 10/11
-
-### Steps
-1. Open `src/StickyNotes.dproj` in Delphi IDE
-2. Build (Ctrl+F9) or Run (F9)
-3. Executable outputs to `src/Win32/Debug/` or `src/Win32/Release/`
-
-### Command Line (MSBuild)
-```bash
-msbuild src/StickyNotes.dproj /p:Config=Release /p:Platform=Win32
+TNoteForm (UI)
+    │  depends only on
+    ▼
+INoteEditorContext (narrow interface)
+    │  implemented by
+    ▼
+TNoteEditorContext (adapter)
+    │  delegates to
+    ▼
+TNoteApplication services
+    ├── TNoteManager
+    ├── TAutosaveService
+    ├── TThemeService
+    └── TSettings
 ```
 
-## Data Storage
+## INoteEditorContext Interface
 
-### Location
+Defined in `src\Application\uNoteEditorContext.pas`.
+
+| Method | Delegates to |
+|--------|-------------|
+| `SaveNote(const ANote: TNote)` | `FNoteManager.SaveNote` |
+| `DeleteNote(const ANoteID: Int64): Boolean` | `FNoteManager.DeleteNote` |
+| `CreateNote(const ATitle, AContent: string; AColor: TNoteColor): TNote` | `FNoteManager.CreateNote` |
+| `ScheduleSave(const ANote: TNote)` | `FAutosaveService.ScheduleSave` |
+| `CancelSave(const ANoteID: Int64)` | `FAutosaveService.CancelSave` |
+| `GetNoteColor(ANoteColor: TNoteColor): TColor` | `FThemeService.GetNoteColor` |
+| `GetNoteTextColor(ANoteColor: TNoteColor): TColor` | `FThemeService.GetNoteTextColor` |
+| `GetConfirmDelete: Boolean` | `FSettings.ConfirmDelete` |
+
+## Ownership Table
+
+| Object | Owner | Created By | Destroyed By |
+|---|---|---|---|
+| TNoteApplication | TTrayForm | TTrayForm.FormCreate | TTrayForm.FormDestroy |
+| TNoteManager | TNoteApplication | TNoteApplication.Create | TNoteApplication.Destroy |
+| TSettingsController (owns TSettings) | TNoteApplication | TNoteApplication.Create | TNoteApplication.Destroy |
+| TAutosaveService | TNoteApplication | TNoteApplication.Create | TNoteApplication.Destroy |
+| THotkeyService | TNoteApplication | TNoteApplication.Create | TNoteApplication.Destroy |
+| TThemeService | TNoteApplication | TNoteApplication.Create | TNoteApplication.Destroy |
+| TBackupService | TNoteApplication | TNoteApplication.Create | TNoteApplication.Destroy |
+| INoteStorage (interface) | TNoteApplication | TNoteApplication.Create | auto (interface ref) |
+| TNoteEditorContext (INoteEditorContext) | TTrayForm (per-note-form) | TTrayForm.CreateNoteForm | auto (interface ref) |
+| TList\<TNoteForm\> | TTrayForm | TTrayForm.FormCreate | TTrayForm.FormDestroy |
+| TTrayController (unused) | TTrayForm | TTrayForm.FormCreate | TTrayForm.FormDestroy |
+| TNoteForm | TTrayForm (Owner) | CreateNoteForm | VCL close |
+| TTrayForm | VCL Application | .dpr CreateForm | VCL runtime |
+
+## TNoteForm Dependency Map
+
+| Before Phase 2B | After Phase 2B |
+|---|---|
+| TNoteManager (4 usages) | |
+| TAutosaveService (3 usages) | |
+| TThemeService (2 usages) | |
+| TSettings (1 usage) | |
+| | INoteEditorContext (single interface, 8 methods) |
+
+## File Layout
+
 ```
-%APPDATA%\StickyNotes\
-├── settings.ini
-└── notes\
-    ├── 0000000001.json
-    ├── 0000000002.json
-    └── ...
-```
-
-### Note JSON Format
-```json
-{
-  "ID": 1,
-  "Title": "Shopping List",
-  "Content": "Milk\nEggs\nBread",
-  "Color": 0,
-  "Left": 100,
-  "Top": 100,
-  "Width": 300,
-  "Height": 250,
-  "AlwaysOnTop": false,
-  "Collapsed": false,
-  "Locked": false,
-  "CreatedAt": "2026-01-15T10:30:00",
-  "UpdatedAt": "2026-01-15T10:35:00"
-}
-```
-
-### Settings INI Format
-```ini
-[General]
-AutoStart=0
-ConfirmDelete=1
-AutosaveDelay=1000
-DefaultColor=0
-DefaultWidth=300
-DefaultHeight=250
-DefaultAlwaysOnTop=0
-EnableHotkeys=1
-
-[Backup]
-Enabled=1
-IntervalDays=1
-
-[Appearance]
-DarkTheme=0
-
-[Hotkeys]
-NewNote=Ctrl+Alt+N
-Search=Ctrl+Alt+F
-```
-
-## Features
-
-### Current (Phase 1-4)
-- ✅ System tray application
-- ✅ JSON file-per-note storage
-- ✅ Borderless note windows with native drag/resize
-- ✅ 8 colors (Yellow, Green, Blue, Pink, Purple, Orange, White, Gray)
-- ✅ Always on Top, Collapse, Lock
-- ✅ Right-click context menu
-- ✅ Global hotkeys (Ctrl+Alt+N = New Note)
-- ✅ Auto-save with configurable delay
-- ✅ Light/Dark theme
-- ✅ Auto-start with Windows
-- ✅ Backup/Restore (ZIP)
-- ✅ Multi-monitor support
-
-### Planned (Phase 5-8)
-- 🔲 Search across all notes (Ctrl+Alt+F)
-- 🔲 Rich text / Markdown support
-- 🔲 Checklists with checkboxes
-- 🔲 Reminders with notifications
-- 🔲 Tags (#work, #home)
-- 🔲 Pin notes (always above others)
-- 🔲 Export (TXT, HTML, PDF, Markdown)
-- 🔲 Cloud sync (OneDrive, Dropbox, Google Drive, Nextcloud)
-- 🔲 Plugin architecture
-
-## Extending Storage
-
-To add a new storage backend (e.g., SQLite, Cloud):
-
-1. Implement `INoteStorage` interface
-2. Add to `TStorageFactory.CreateStorage`
-3. No UI or controller changes needed
-
-```pascal
-type
-  TCloudStorage = class(TInterfacedObject, INoteStorage)
-  public
-    function SaveNote(const ANote: TNote): Boolean;
-    function DeleteNote(const ANoteID: Int64): Boolean;
-    function LoadAllNotes: TObjectList<TNote>;
-    function GetNextID: Int64;
-    procedure Initialize;
-    procedure Finalize;
-  end;
+src\
+├── Application\
+│   ├── uNoteApplication.pas      (TNoteApplication — application orchestration)
+│   └── uNoteEditorContext.pas    (INoteEditorContext + TNoteEditorContext adapter)
+├── Controllers\
+│   ├── uNoteManager.pas          (TNoteManager — note CRUD orchestration)
+│   ├── uSettingsController.pas   (TSettingsController — settings INI lifecycle)
+│   └── uTrayController.pas       (TTrayController — unused, preserved as dead code)
+├── Forms\
+│   ├── uTrayForm.pas/.dfm        (TTrayForm — thin UI tray form)
+│   ├── uNoteForm.pas/.dfm        (TNoteForm — note editor window)
+│   ├── uSettingsForm.pas/.dfm    (TSettingsForm — settings dialog)
+│   └── uAboutForm.pas/.dfm       (TAboutForm — about dialog)
+├── Models\
+│   ├── uNote.pas                 (TNote — domain object)
+│   ├── uSettings.pas             (TSettings — persisted INI settings)
+│   └── uEnums.pas                (TNoteColor, TStorageType + helpers)
+├── Services\
+│   ├── uAutosaveService.pas      (TAutosaveService — debounced timer save)
+│   ├── uBackupService.pas        (TBackupService — ZIP backup/restore)
+│   ├── uHotkeyService.pas        (THotkeyService — global hotkeys)
+│   ├── uStartupService.pas       (TStartupService — Run-key autostart)
+│   └── uThemeService.pas         (TThemeService — color palettes, VCL styles)
+├── Storage\
+│   ├── uStorage.pas              (INoteStorage interface + TStorageFactory)
+│   ├── uJsonStorage.pas          (TJsonStorage — JSON file-per-note)
+│   └── uSQLiteStorage.pas        (stub only, not functional)
+└── Utils\
+    ├── uColorUtils.pas, uIso8601.pas, uJsonUtils.pas
+    ├── uMonitorUtils.pas, uWindowUtils.pas
+    └── uILogger.pas
 ```
 
-## Hotkeys
+## Application/UI Event Boundary
 
-| Action | Default | Configurable |
-|--------|---------|--------------|
-| New Note | Ctrl+Alt+N | Yes |
-| Search | Ctrl+Alt+F | Yes |
+### TNoteForm → TTrayForm Events
 
-Format: `Ctrl+Alt+Shift+Win+Key` (e.g., `Ctrl+Alt+N`, `Shift+F1`)
+| Event | Direction | Purpose |
+|-------|-----------|---------|
+| `OnClosed: TNotifyEvent` | TNoteForm → TTrayForm | Notifies owner when form closes so it can be removed from FNoteForms tracking list |
 
-## Themes
+### TNoteApplication → TTrayForm Events (via TNoteManager → TNoteApplication passthrough)
 
-### Light Theme (Default)
-Standard Windows 10 style with colored sticky notes
+| Event | Direction | Purpose | Currently used? |
+|-------|-----------|---------|-----------------|
+| `OnNoteCreated: TNoteEvent` | TNoteManager → TNoteApplication → TTrayForm | Opens a note window when a new note is created (by duplicate, hotkey, etc.) | YES — creates TNoteForm, adds to FNoteForms |
+| `OnNoteChanged: TNoteEvent` | TNoteManager → TNoteApplication → TTrayForm | Notification that a note was saved/persisted | NO — handler is empty (placeholder for future UI refresh) |
+| `OnNoteDeleted: TNoteEvent` | TNoteManager → TNoteApplication → TTrayForm | Closes the note window when a note is deleted from storage | YES — finds form in FNoteForms, calls CloseWithoutSaving, removes from list |
 
-### Dark Theme
-Windows 10 Dark style with muted note colors
+### TTrayForm → TNoteApplication Operations
 
-## License
+All delegated through `TNoteApplication` service properties by TTrayForm event handlers.
 
-MIT License - See LICENSE file for details.
+### FNoteForms Ownership
 
-## Contributing
+`FNoteForms: TList<TNoteForm>` is owned by `TTrayForm` and is classified as **UI state** (window tracking). It maps TNote domain objects to their TNoteForm window presentations.
 
-1. Follow the existing architecture patterns
-2. Keep Forms free of business logic
-3. Use interfaces for cross-layer communication
-4. Add events to `TNoteManager` for new cross-cutting features
-5. Write unit tests for Models and Services
+Operations:
+- **Add** — in `CreateNoteForm` (when a new note window is created)
+- **Find** — in `OnNoteDeleted` (to find the form for a deleted note)
+- **Find** — in `OpenAllNotes` (to avoid duplicate windows)
+- **Iterate** — in `CloseAllNotes` (application shutdown)
+- **Iterate** — in `SaveAllNotes` (application shutdown)
+- **Remove** — in `OnNoteDeleted` handler (when a note is deleted externally)
+- **Remove** — in `OnClosed` handler (when a form is closed by the user)
+
+The list must NOT be moved to TNoteApplication because it tracks window lifecycle, not application state.
+
+### TNoteForm Lifecycle
+
+1. **Created** by `TTrayForm.CreateNoteForm` → `TNoteForm.CreateNote(Self, ...)`
+2. **Added** to `FNoteForms` immediately after creation
+3. **Shown** via `Form.Show`
+4. **Closed** by user (X button) → `FormClose` fires → saves note, cancels autosave, fires `OnClosed`, VCL frees form
+5. **Closed** by application (`OnNoteDeleted` handler) → `CloseWithoutSaving` sets `FIsClosing := True`, close, form freed
+6. **Closed** during shutdown (`CloseAllNotes`) → `CloseWithoutSaving` on each form
+7. **Removed** from `FNoteForms` in `OnClosed` handler (any close path)
+
+## Phase Status
+
+| Phase | Status |
+|-------|--------|
+| Phase 1 — Reliability | COMPLETE |
+| Phase 2 — Architecture | COMPLETE |
+| Phase 2A — TNoteApplication extraction | COMPLETE |
+| Phase 2B — Service/Form decoupling | COMPLETE |
+| Phase 2C — Application/UI event boundary | COMPLETE |
+| Phase 3 — Persistence | NOT STARTED |
+
+## Dependency Injection Status
+
+| Aspect | Status |
+|--------|--------|
+| Explicit constructor/interface injection | USED WHERE JUSTIFIED |
+| DI container/framework | NOT USED |
+| DI container/framework | NOT PLANNED |
+
+## Known Limitations
+
+- Full manual application smoke testing in a Delphi IDE environment remains unverified.
+- `TTrayController` is dead code (preserved, documented).
+- `TNoteApplication.Initialize` uses `TStyleManager.TrySetStyle` which cannot be tested in a DUnitX console environment (hangs). The `TestApplicationInitializeShutdown` test was replaced with `TestApplicationShutdownIsSafe` for this reason.

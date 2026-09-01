@@ -77,6 +77,7 @@
     <Compile Include="Services\uThemeService.pas" />
     <Compile Include="Services\uBackupService.pas" />
     <Compile Include="Application\uNoteApplication.pas" />
+    <Compile Include="Application\uNoteEditorContext.pas" />
     <Compile Include="Utils\uWindowUtils.pas" />
     <Compile Include="Utils\uJsonUtils.pas" />
     <Compile Include="Utils\uIso8601.pas" />
