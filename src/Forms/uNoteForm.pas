@@ -7,7 +7,7 @@ uses
   System.Math,
   Vcl.Graphics, Vcl.Controls, Vcl.Forms, Vcl.Dialogs, Vcl.StdCtrls, Vcl.ExtCtrls,
   Vcl.Menus, Vcl.ComCtrls,
-  uNote, uNoteManager, uAutosaveService, uWindowUtils, uColorUtils, uThemeService, uSettings, uEnums;
+  uNote, uNoteEditorContext, uEnums;
 
 type
   TNoteForm = class(TForm)
@@ -66,14 +66,12 @@ type
     procedure FormMouseWheel(Sender: TObject; Shift: TShiftState; WheelDelta: Integer; MousePos: TPoint; var Handled: Boolean);
   private
     FNote: TNote;
-    FNoteManager: TNoteManager;
-    FAutosaveService: TAutosaveService;
-    FThemeService: TThemeService;
-    FSettings: TSettings;
+    FEditorContext: INoteEditorContext;
     FDragMode: Boolean;
     FDragOffset: TPoint;
     FCollapsedHeight: Integer;
     FIsClosing: Boolean;
+    FOnClosed: TNotifyEvent;
     procedure LoadNote;
     procedure SaveNote;
     procedure ApplyColor;
@@ -83,14 +81,14 @@ type
     procedure WMNCHitTest(var Message: TWMNCHitTest); message WM_NCHITTEST;
     procedure WMGetMinMaxInfo(var Message: TWMGetMinMaxInfo); message WM_GETMINMAXINFO;
   public
-    constructor CreateNote(AOwner: TComponent; ANote: TNote; ANoteManager: TNoteManager;
-      AAutosaveService: TAutosaveService; AThemeService: TThemeService; ASettings: TSettings);
+    constructor CreateNote(AOwner: TComponent; ANote: TNote; const AContext: INoteEditorContext);
     // Lets an owning form (e.g. TTrayForm) close this note window without
     // triggering a re-save of a note that's already been deleted/is being
     // torn down in bulk, without reaching into the private FIsClosing field.
     procedure CloseWithoutSaving;
     procedure Save;  // Public wrapper for SaveNote
     property Note: TNote read FNote;
+    property OnClosed: TNotifyEvent read FOnClosed write FOnClosed;
   end;
 
 var
@@ -99,7 +97,7 @@ var
 implementation
 
 uses
-  Winapi.ShellAPI;
+  Winapi.ShellAPI, uWindowUtils, uColorUtils;
 
 const
   MIN_WIDTH = 200;
@@ -108,15 +106,11 @@ const
 
 { TNoteForm }
 
-constructor TNoteForm.CreateNote(AOwner: TComponent; ANote: TNote; ANoteManager: TNoteManager;
-  AAutosaveService: TAutosaveService; AThemeService: TThemeService; ASettings: TSettings);
+constructor TNoteForm.CreateNote(AOwner: TComponent; ANote: TNote; const AContext: INoteEditorContext);
 begin
   inherited Create(AOwner);
   FNote := ANote;
-  FNoteManager := ANoteManager;
-  FAutosaveService := AAutosaveService;
-  FThemeService := AThemeService;
-  FSettings := ASettings;
+  FEditorContext := AContext;
   FCollapsedHeight := COLLAPSED_HEIGHT;
   FIsClosing := False;
 end;
@@ -211,7 +205,9 @@ procedure TNoteForm.FormClose(Sender: TObject; var Action: TCloseAction);
 begin
   FIsClosing := True;
   SaveNote;
-  FAutosaveService.CancelSave(FNote.ID);
+  FEditorContext.CancelSave(FNote.ID);
+  if Assigned(FOnClosed) then
+    FOnClosed(Self);
   Action := caFree;
 end;
 
@@ -257,18 +253,18 @@ begin
     FNote.Height := FCollapsedHeight;
   end;
   
-  FNoteManager.SaveNote(FNote);
+  FEditorContext.SaveNote(FNote);
 end;
 
 procedure TNoteForm.ApplyColor;
 var
   C: TColor;
 begin
-  C := FThemeService.GetNoteColor(FNote.Color);
+  C := FEditorContext.GetNoteColor(FNote.Color);
   Color := C;
   pnlHeader.Color := TColorUtils.DarkenColor(C, 20);
   mmContent.Color := C;
-  mmContent.Font.Color := FThemeService.GetNoteTextColor(FNote.Color);
+  mmContent.Font.Color := FEditorContext.GetNoteTextColor(FNote.Color);
   
   btnClose.Font.Color := mmContent.Font.Color;
   btnColor.Font.Color := mmContent.Font.Color;
@@ -368,7 +364,7 @@ end;
 procedure TNoteForm.mmContentChange(Sender: TObject);
 begin
   if not FNote.Locked then
-    FAutosaveService.ScheduleSave(FNote);
+    FEditorContext.ScheduleSave(FNote);
 end;
 
 procedure TNoteForm.mmContentKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
@@ -421,10 +417,10 @@ procedure TNoteForm.miDeleteClick(Sender: TObject);
 begin
   if FNote.Locked then Exit;
 
-  if (not FSettings.ConfirmDelete) or
+  if (not FEditorContext.GetConfirmDelete) or
      (MessageDlg('Delete this note?', mtConfirmation, [mbYes, mbNo], 0) = mrYes) then
   begin
-    FNoteManager.DeleteNote(FNote.ID);
+    FEditorContext.DeleteNote(FNote.ID);
     Close;
   end;
 end;
@@ -435,10 +431,10 @@ var
 begin
   if FNote.Locked then Exit;
   
-  NewNote := FNoteManager.CreateNote(FNote.Title + ' (copy)', FNote.Content, FNote.Color);
+  NewNote := FEditorContext.CreateNote(FNote.Title + ' (copy)', FNote.Content, FNote.Color);
   NewNote.Left := FNote.Left + 30;
   NewNote.Top := FNote.Top + 30;
-  FNoteManager.SaveNote(NewNote);
+  FEditorContext.SaveNote(NewNote);
 end;
 
 procedure TNoteForm.miPropertiesClick(Sender: TObject);
@@ -450,7 +446,7 @@ end;
 
 procedure TNoteForm.miNewNoteClick(Sender: TObject);
 begin
-  FNoteManager.CreateNote('', '', ncYellow);
+  FEditorContext.CreateNote('', '', ncYellow);
 end;
 
 procedure TNoteForm.pnlHeaderMouseDown(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
@@ -470,7 +466,7 @@ begin
     Top := Top + (Y - FDragOffset.Y);
     FNote.Left := Left;
     FNote.Top := Top;
-    FAutosaveService.ScheduleSave(FNote);
+    FEditorContext.ScheduleSave(FNote);
   end;
 end;
 

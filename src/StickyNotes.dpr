@@ -25,6 +25,7 @@ uses
   uThemeService in 'Services\uThemeService.pas',
   uBackupService in 'Services\uBackupService.pas',
   uNoteApplication in 'Application\uNoteApplication.pas',
+  uNoteEditorContext in 'Application\uNoteEditorContext.pas',
   uWindowUtils in 'Utils\uWindowUtils.pas',
   uJsonUtils in 'Utils\uJsonUtils.pas',
   uColorUtils in 'Utils\uColorUtils.pas',

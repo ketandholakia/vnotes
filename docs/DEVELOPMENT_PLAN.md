@@ -171,18 +171,21 @@ tests/
 
 ## Next Recommended Task
 
-**Phase 2A — TNoteApplication extraction — is now complete**. 
+**Phase 2 — Architecture — is now complete**. 
 
-- 19/19 DUnitX tests compile and execute ✅ (16 original + 3 new architecture tests)
+- 19/19 DUnitX tests compile and execute ✅
 - Application builds with 0 errors ✅
-- TNoteApplication owns all services; TTrayForm is now a thin UI/tray form ✅
+- TNoteApplication owns all services; TTrayForm is a thin UI/tray form ✅
+- INoteEditorContext decouples TNoteForm from service implementations ✅
+- OnClosed event fixes the dangling FNoteForms reference ✅
+- Explicit dependency injection used pragmatically; no DI container ✅
 
 **Next steps**:
 
 1. **Runtime verification** (in Delphi IDE if available): Execute the compiled application and verify the full note create/edit/delete/close/restart cycle
-2. **Proceed to Phase 2B**: Decouple services from forms / introduce explicit application dependencies
+2. **Proceed to Phase 3A**: Persistence Architecture Analysis — evaluate JSON storage, SQLite, schema versioning, and migration strategy
 
-**Immediate next task**: Phase 2B — Service/Form Decoupling
+**Immediate next task**: Phase 3A — Persistence Architecture Analysis
 
 ---
 
@@ -207,14 +210,24 @@ tests/
 | `docs/DEVELOPMENT_PLAN.md` | Updated with verified build status, completed tasks, and Phase 1 completion status |
 
 ```
-Phase 2A — TNoteApplication: COMPLETE (Phase 2A)
-  - [x] TNoteApplication class created in src/Application/uNoteApplication.pas
-  - [x] Services extracted from TTrayForm to TNoteApplication
-  - [x] Initialize/Shutdown lifecycle methods
-  - [x] 3 architecture-level tests added (19 total, all pass)
-Phase 2B — Service/Form Decoupling: NOT STARTED
-Dependency Injection: NOT STARTED
-TTrayForm further refinement: NOT STARTED
+Phase 2 — Architecture: COMPLETE
+  Phase 2A — TNoteApplication extraction: COMPLETE
+    - [x] TNoteApplication class created in src/Application/uNoteApplication.pas
+    - [x] Services extracted from TTrayForm to TNoteApplication
+    - [x] Initialize/Shutdown lifecycle methods
+    - [x] 3 architecture-level tests added (19 total, all pass)
+  Phase 2B — Service/Form Decoupling: COMPLETE
+    - [x] INoteEditorContext narrow interface created
+    - [x] TNoteEditorContext adapter class created
+    - [x] TNoteForm decoupled from 4 direct service dependencies
+    - [x] TNoteForm now depends only on INoteEditorContext
+  Phase 2C — Application/UI Event Boundary: COMPLETE
+    - [x] Event flow analysis complete
+    - [x] FNoteForms ownership analysis complete
+    - [x] TNoteForm.OnClosed event added to fix dangling reference bug
+    - [x] All 19 tests pass
+Explicit dependency injection: USED PRAGMATICALLY
+DI container/framework: NOT PLANNED
 SQLite storage: NOT IMPLEMENTED (stub only)
 High-DPI: NOT ADDRESSED
 Search: NOT IMPLEMENTED
