@@ -1,0 +1,39 @@
+# Delphi / Pascal
+# Build artifacts
+*.dcu
+*.dcu.*
+*.exe
+*.dll
+*.map
+*.rsm
+*.drc
+*.dres
+*.cfg
+*.dof
+*.identcache
+*.tvsconfig
+*.tmp
+*.tmp.*
+*.bak
+*.~*
+
+# Delphi IDE folders
+__history/
+__history
+__recovery/
+__recovery
+Win32/
+Win64/
+Linux64/
+Android/
+iOS/
+macOS/
+
+# Stray / temp files
+build_log.txt
+*_*.log
+*.log
+
+# OS files
+Thumbs.db
+Desktop.ini
