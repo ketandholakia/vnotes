@@ -364,21 +364,45 @@ No additional abstraction layers are needed. `INoteStorage` is sufficient.
 | Phase | Task | Description |
 |-------|------|-------------|
 | Phase 3A | Persistence Architecture Analysis | COMPLETE |
-| Phase 3B | JSON Schema Versioning | Add schema version field, implement read-compatibility |
+| Phase 3B | JSON Schema Versioning | COMPLETE — schemaVersion field, legacy v0 reader, future/invalid rejection |
 | Phase 3C | SQLite Storage Implementation | Implement TSqliteStorage with FireDAC |
 | Phase 3D | Migration Infrastructure | JSON → SQLite migration tooling, dual-write |
 | Phase 3E | Backup/Restore Adaptation | Update backup for both JSON and SQLite backends |
 | `UpdatedAt` | String (ISO 8601) | `UpdatedAt: TDateTime` | Yes | Now |
 
-#### Versioning
+#### Versioning (Phase 3B — COMPLETE)
 
-**Current JSON format is NOT versioned.** No schema version field exists in the JSON.
+**The JSON format is explicitly versioned.** Every note written by `SaveNote` begins with:
 
-Consequences:
-- A future change to any field name, type, or representation will break backward compatibility
-- `JsonToNote` cannot distinguish between old format, current format, and future format
-- `JsonToNote` silently uses defaults for missing fields (graceful read, but no explicit version knowledge)
-- Corrupt JSON is detected by `ParseJSONValue` returning nil — logged as warning, file skipped
+```json
+{
+  "schemaVersion": 1,
+  "ID": 1,
+  "Title": "...",
+  "Content": "...",
+  "Color": 0,
+  "Left": 100, "Top": 100, "Width": 300, "Height": 250,
+  "AlwaysOnTop": false, "Collapsed": false, "Locked": false,
+  "CreatedAt": "2026-09-01T12:00:00",
+  "UpdatedAt": "2026-09-01T12:00:00"
+}
+```
+
+Rules enforced by `TJsonStorage.JsonToNote`:
+
+| Input | Behavior |
+|---|---|
+| Missing `schemaVersion` | Legacy/unversioned format → interpreted as schema version **0**, read with the legacy field mapping (same defaults as before versioning). File is **not** rewritten on load. |
+| `schemaVersion = 0` or `1` | Loaded normally. |
+| `schemaVersion < 0` | Rejected (`EJsonSchemaException`), logged as warning, file preserved. |
+| `schemaVersion > CURRENT_SCHEMA_VERSION` (e.g. 999) | Rejected as unsupported future schema, logged as warning, file preserved, other notes still load. |
+| Wrong type (`"abc"`, `null`, `{}`, `[]`) | Rejected as invalid schema metadata, logged as warning, file preserved. |
+
+- Version constants live in one place: `TJsonStorage.CURRENT_SCHEMA_VERSION = 1`, `LEGACY_SCHEMA_VERSION = 0`, `SCHEMA_VERSION_FIELD = 'schemaVersion'`.
+- No general migration framework exists yet. For v1 there is no field transformation; the version boundary is what was established.
+- Legacy files are **never** automatically rewritten. Future enhancement (deferred): optional normalization pass that rewrites legacy files as v1.
+- `LoadAllNotes` distinguishes diagnostics: corrupt JSON vs unsupported/invalid schema version.
+- `TBackupService` restore parses known fields directly and ignores unknown fields, so backups of versioned JSON restore unchanged. No BackupService changes were required.
 
 #### Atomicity
 
@@ -394,7 +418,7 @@ Cross-note atomicity: NO — each note save is individually atomic. No transacti
 | Phase 2B — Service/Form decoupling | COMPLETE |
 | Phase 2C — Application/UI event boundary | COMPLETE |
 | Phase 3A — Persistence Architecture Analysis | COMPLETE |
-| Phase 3B — JSON Schema Versioning | NOT STARTED |
+| Phase 3B — JSON Schema Versioning | COMPLETE |
 | Phase 3C — SQLite Storage Implementation | NOT STARTED |
 
 ## Dependency Injection Status

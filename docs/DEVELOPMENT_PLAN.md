@@ -233,6 +233,16 @@ Phase 3A — Persistence Architecture Analysis: COMPLETE
     - [x] JSON format versioning gap identified
     - [x] Recommendation: JSON NOW → SQLITE LATER
     - [x] Roadmap defined through Phase 3E
+Phase 3B — JSON Schema Versioning: COMPLETE
+    - [x] schemaVersion field added (CURRENT_SCHEMA_VERSION = 1)
+    - [x] Unversioned legacy files interpreted as schema version 0
+    - [x] Future schema versions (> 1) safely rejected, file preserved
+    - [x] Invalid schemaVersion (string/null/object/array/negative) safely rejected
+    - [x] Legacy files are NOT automatically rewritten
+    - [x] LoadAllNotes distinguishes corrupt JSON vs unsupported schema
+    - [x] No migration framework (deferred); v0→v1 requires no field transformation
+    - [x] INoteStorage unchanged; BackupService unchanged (tolerant parser)
+    - [x] All 24 tests pass (19 existing + 5 new schema tests)
 Explicit dependency injection: USED PRAGMATICALLY
 DI container/framework: NOT PLANNED
 SQLite storage: NOT IMPLEMENTED (stub only)
