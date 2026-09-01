@@ -207,7 +207,6 @@ Why not "remove dead code" first:
 - Add a small `INoteQuery` interface (or a free function `TNoteQuery`) with one method: `Search(const AText: string): TObjectList<TNote>`.
 - Add `TNotesListForm` (VCL form) with a list view, a search box, and a "Show" / "Bring to front" action.
 - Wire the new form to `Ctrl+Alt+F` and to the tray "Open Notes List" menu.
-- Optionally, add a "Recently modified" submenu under the tray icon (`TTrayController.UpdateNotesMenu` finally gets a real body).
 - Tests: `INoteQuery.Search` filter test (case-insensitive substring across Title+Content, empty query returns all, result ordering), and a smoke test that `TNotesListForm` populates from a known `TNoteManager`.
 - Out of scope: persistent search history, regex, FTS5, indexing, SQLite.
 
@@ -215,7 +214,7 @@ Why not "remove dead code" first:
 
 | Phase | Objective | Reason | Dependencies | Expected changes | Testing |
 |---|---|---|---|---|---|
-| **4B** | Note list + in-memory search | Closes HIGH user-facing gap; keeps SQLite deferred | `TNoteManager` (already exists), `TJsonStorage.LoadAllNotes` | New `INoteQuery` (in `Storage/` or new `Query/`); new `TNotesListForm` (in `Forms/`); `TTrayForm.OnOpenNotesList`/`OnHotkeySearch` wire to new form; optional recently-modified submenu | Unit tests for filter; smoke test for form population |
+| **4B** | Note list + in-memory search | Closes HIGH user-facing gap; keeps SQLite deferred | `TNoteManager` (already exists), `TJsonStorage.LoadAllNotes` | New `INoteQuery` (in `Storage/` or new `Query/`); new `TNotesListForm` (in `Forms/`); `TTrayForm.OnOpenNotesList`/`OnHotkeySearch` wire to new form | Unit tests for filter; smoke test for form population |
 | **4C** | Reliability & lifecycle polish | Bundle several small HIGH/MEDIUM debt items into one phase | Phase 4B (no code overlap) | Single-instance mutex; scheduled-backup timer wired to settings; backup retention (keep last N); `Settings.Cancel` rolls back live state; `TNoteForm` clamps to current monitor on show; `TNoteForm` displays `Title`; hotkey-registration failure surfaced to user | Unit tests for single-instance guard (mock mutex), backup retention, monitor clamp helper; existing tests unchanged |
 | **4D** | Dead-code cleanup & docs | Remove now-unused symbols; align docs with reality | Phase 4C (so nothing in 4C depends on them) | Remove `TTrayController`; remove `hkCustom1/2/3`; remove `THotkeyService.UpdateFromSettings`; remove `TNoteForm.WndProc` empty override; implement or remove `miProperties` stub; update README to remove "Search" claim and add a real description of 4B | All existing tests still pass |
 
