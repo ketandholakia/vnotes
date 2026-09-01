@@ -1,3 +1,4 @@
+{ Reserved for Phase 4C — monitor clamp. Not currently referenced by the application. }
 unit uMonitorUtils;
 
 interface

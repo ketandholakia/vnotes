@@ -82,6 +82,7 @@
     <Compile Include="Utils\uJsonUtils.pas" />
     <Compile Include="Utils\uIso8601.pas" />
     <Compile Include="Utils\uColorUtils.pas" />
+    <Compile Include="Utils\uMonitorUtils.pas" />
     <Compile Include="Forms\uNoteForm.pas">
       <Form>Form</Form>
     </Compile>

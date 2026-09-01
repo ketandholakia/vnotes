@@ -166,7 +166,7 @@ tests/
 3. **Autosave redesign**: Uses dictionary keyed by note ID - preserves existing public API; stores TNote references (not copies) - depends on TNoteManager ownership
 4. **BackupService**: CreateBackupZip has unused return value and unused Stream variable (minor warnings)
 5. **Test infrastructure**: DUnitX v1.0 (installed with Delphi 10.3 Rio) works correctly — all 16 tests compile and pass using `[TestFixture]` and `[Test]` attributes
-6. **uMonitorUtils**: Removed from project (compilation errors, unused); source file retained
+6. **uMonitorUtils**: Reserved for the Phase 4C monitor-clamp task (one-line header comment added in Phase 4A.5); re-registered in `StickyNotes.dproj`. Standalone compile on Delphi 12 FAILS until `Winapi.MultiMon` is added to its `uses` clause (monitor API moved out of `Winapi.Windows`) — fix deferred to Phase 4C when it is wired into `TNoteForm.FormShow`
 7. **No runtime verification**: Application not executed in this environment
 
 ## Next Recommended Task
@@ -333,6 +333,84 @@ StickyNotes.dpr (entry point)
 | `build_tests.bat` | Added `..\src\Application` and `..\src\Controllers` to -U paths |
 | `docs/DEVELOPMENT_PLAN.md` | Updated with Phase 2A completion status |
 ```
+
+## Phase 4A.5 — Repo & Build Hygiene
+
+> Status: COMPLETE + VALIDATED (2026-09-01). No `src/Application`, `src/Controllers`, `src/Models`, `src/Services`, `src/Storage`, or `src/Forms` files were modified — the only source change is `src/Utils/uMonitorUtils.pas` (marked as reserved for Phase 4C) plus its re-registration in `src/StickyNotes.dproj`. No tests modified; baseline 24/24 PASS preserved. Toolchain: **Delphi 12 Athens / RAD Studio 23.0** (dcc32 v36.0).
+
+### Toolchain Bootstrap (both scripts)
+
+`build.bat` and `build_tests.bat` now self-configure the Delphi toolchain before invoking dcc32:
+- If `DELPHI_ROOT` is set and contains `bin\rsvars.bat`, that is used.
+- Otherwise probe in order: `C:\Program Files (x86)\Embarcadero\Studio\23.0`, then `22.0`, then `21.0`.
+- First existing `bin\rsvars.bat` wins and is `call`ed (sets PATH/BDS).
+- If none found: clear error naming all tried paths, then `exit /b 1`.
+- After rsvars, echo the resolved `dcc32` path and version banner (absorbs `check_version.bat`'s role).
+- `build.bat` also `mkdir`s the `-N` output dir (`Win32\Debug` — dcc32 does not auto-create it), so a fresh checkout succeeds.
+
+### What Changed
+
+- [x] **`build_log.txt` deleted** — contained a stale/misleading dcc32 log that compiled `StickyNotes.dproj` (XML) instead of `StickyNotes.dpr`. `.gitignore` already ignores `build_log.txt`, so it will not reappear.
+- [x] **18 root build/helper scripts consolidated to two**:
+  - `build.bat` — canonical main-app build (Win32 Debug), portable via `%~dp0`, self-bootstrapped toolchain.
+  - `build_tests.bat` — canonical DUnitX test build; `DUNITX_PATH` derived from the resolved Delphi root (`%DELPHI_ROOT%\source\DunitX`).
+  - Deleted 17 redundant scripts: `build_main.bat`, `build_main2.bat`, `build_main3.bat`, `build_backup.bat`, `build_tests2..9.bat`, `build_tnote_test*.bat`, `build_unote.bat`, `check_version.bat`. (The plan tabulated 18 scripts including `check_version.bat`.)
+  - No dangling references: grep for `build_main`, `build_tests2..9`, `build_backup`, `build_unote`, `build_tnote`, `check_version` found hits only in history/plan docs (DEVELOPMENT_PLAN, VNOTES_ACTION_PLAN) and `build.bat`'s own REM comment; no `<PreBuildEvent>`/`<PostBuildEvent>` nodes in `StickyNotes.dproj`; no CI config present.
+- [x] **`src/Utils/uMonitorUtils.pas` resolved** — was orphaned (unreferenced, absent from `StickyNotes.dproj`). Now: one-line header comment marks it **reserved for the Phase 4C monitor-clamp task**, and it is re-registered in `src/StickyNotes.dproj`. **Note:** its first standalone compile on Delphi 12 FAILS (see Validation) — the monitor API (`TMonitorInfo`, `MonitorFromWindow`, etc.) lives in `Winapi.MultiMon` in Delphi 12, not `Winapi.Windows`; fix deferred to Phase 4C per task instruction (report, do not fix).
+- [x] **`.gitignore` extended** for IDE-generated project-local files: `*.local`, `*.dsk`, `*.dproj.local`, `*.dpr.local`, `*.stat`, `*.ddp` (in addition to the existing `*.dcu`, `*.exe`, `*.identcache`, `__history/`, `Win32/`, `*.log`, etc.).
+- [x] **`README.md` corrected**:
+  - "Search Notes" hotkey (`Ctrl+Alt+F`) marked **PLANNED (Phase 4B)** — hotkey is registered but the handler is a `// TODO: Show search form` stub that currently falls back to re-showing note windows.
+  - Multi-monitor support marked **PARTIAL** — notes restore to their last monitor, but there is no clamp-to-monitor logic yet (`uMonitorUtils` reserved for Phase 4C).
+  - Build section documents `build.bat` / `build_tests.bat` and their self-configuring toolchain.
+
+### Validation Results (2026-09-01, plain cmd — no RAD Studio prompt)
+
+| # | Check | Result |
+|---|-------|--------|
+| 1 | `build.bat` (Win32 Debug, Delphi 12) | **PASS** — `dcc32 v36.0`, 4415 lines, 0 errors (only H2219/H2077/H2164/H2269/H2443 hints). Output: `src\Win32\Debug\StickyNotes.exe` |
+| 2 | `build_tests.bat` + test run | **PASS** — 38628 lines, 0 errors; `StickyNotes.Tests.exe` ran **24/24 PASS, 0 Failed, 0 Erred, 0 Leaked, 0 Ignored** |
+| 3 | `msbuild src\StickyNotes.dproj /t:Build /p:Config=Debug /p:Platform=Win32` | **PASS** — project file well-formed (0 errors, only hints); confirms the `uMonitorUtils` compile-item edit is valid |
+| 4 | Standalone compile of `uMonitorUtils.pas` (same search paths as build.bat) | **FAILS** — first real compile; E2003 undeclared identifiers (verbatim below). Reported per task 6.4; **not fixed here** (deferred to Phase 4C with the FormShow wire-up) |
+| 5 | Full build -> `git status` | **CLEAN** — no regenerated build artifacts appear (validates new `.gitignore`). **Note:** `msbuild` regenerates the tracked `src/StickyNotes.res` (cgrc); it was restored with `git checkout` after validation. |
+
+**uMonitorUtils standalone compile errors (verbatim, Delphi 12 / dcc32 36.0):**
+
+```
+Utils\uMonitorUtils.pas(17) Error: E2003 Undeclared identifier: 'TMonitorInfo'
+Utils\uMonitorUtils.pas(32) Error: E2003 Undeclared identifier: 'MonitorFromWindow'
+Utils\uMonitorUtils.pas(32) Error: E2003 Undeclared identifier: 'MONITOR_DEFAULTTONEAREST'
+Utils\uMonitorUtils.pas(37) Error: E2007 Constant or type identifier expected
+Utils\uMonitorUtils.pas(40) Error: E2066 Missing operator or semicolon
+Utils\uMonitorUtils.pas(47) Error: E2007 Constant or type identifier expected
+Utils\uMonitorUtils.pas(50) Error: E2066 Missing operator or semicolon
+Utils\uMonitorUtils.pas(62) Error: E2003 Undeclared identifier: 'MonitorFromPoint'
+Utils\uMonitorUtils.pas(62) Error: E2003 Undeclared identifier: 'MONITOR_DEFAULTTOPRIMARY'
+Utils\uMonitorUtils.pas(65) Error: E2005 'TMonitorInfo' is not a type identifier
+Utils\uMonitorUtils.pas(67) Error: E2066 Missing operator or semicolon
+Utils\uMonitorUtils.pas(68) Error: E2033 Types of actual and formal var parameters must be identical
+Utils\uMonitorUtils.pas(105) Error: E2003 Undeclared identifier: 'MonitorFromPoint'
+Utils\uMonitorUtils.pas(105) Error: E2003 Undeclared identifier: 'MONITOR_DEFAULTTONEAREST'
+Utils\uMonitorUtils.pas(110) Error: E2003 Undeclared identifier: 'MonitorFromRect'
+Utils\uMonitorUtils.pas(110) Error: E2003 Undeclared identifier: 'MONITOR_DEFAULTTONEAREST'
+Utils\uMonitorUtils.pas(151) Error: E2003 Undeclared identifier: 'MonitorFromPoint'
+Utils\uMonitorUtils.pas(151) Error: E2003 Undeclared identifier: 'MONITOR_DEFAULTTONEAREST'
+```
+
+Root cause (confirmed against Delphi 12 RTL source): `Winapi.Windows.pas` does NOT declare the monitor API in Delphi 12 — `tagMONITORINFO`/`TMonitorInfo`/`MonitorFrom...` are declared in `Winapi.MultiMon.pas` (a separate unit at `source\rtl\win\Winapi.MultiMon.pas`). Phase 4C monitor-clamp work must add `Winapi.MultiMon` to `uMonitorUtils.pas`'s `uses` clause when it is referenced from `FormShow`.
+
+### Files Changed During Phase 4A.5
+
+| File | Change |
+|------|--------|
+| `build_log.txt` | **Deleted** — stale dcc32 run against `.dproj` XML instead of `.dpr` |
+| `build.bat` | **Created** — canonical main build; self-bootstrap toolchain (DELPHI_ROOT / 23.0 / 22.0 / 21.0), `mkdir Win32\Debug`, version banner echo (absorbs `check_version.bat`), portable `%~dp0` |
+| `build_tests.bat` | `cd` portable; self-bootstrap toolchain; `DUNITX_PATH` derived from resolved Delphi root |
+| `build_main*.bat`, `build_backup.bat`, `build_tests2..9.bat`, `build_tnote_test*.bat`, `build_unote.bat`, `check_version.bat` | **Deleted** — redundant per-script build helpers (17 files) |
+| `src/Utils/uMonitorUtils.pas` | One-line header comment: reserved for Phase 4C monitor-clamp task |
+| `src/StickyNotes.dproj` | Re-added `Utils\uMonitorUtils.pas` to `<Compile>` items |
+| `.gitignore` | Added `*.local`, `*.dsk`, `*.dproj.local`, `*.dpr.local`, `*.stat`, `*.ddp` |
+| `README.md` | Search hotkey marked Planned (Phase 4B); multi-monitor marked Partial; build section self-configuring toolchain |
+| `docs/DEVELOPMENT_PLAN.md` | This Phase 4A.5 entry (now COMPLETE + VALIDATED) |
 
 ---
 
