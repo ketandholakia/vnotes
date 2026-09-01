@@ -4,7 +4,7 @@ interface
 
 uses
   System.SysUtils, System.Classes, System.IOUtils, System.Generics.Collections,
-  System.SyncObjs,
+  System.SyncObjs, System.JSON,
   DUnitX.TestFramework, uJsonStorage, uNote, uEnums, uILogger;
 
 type
@@ -23,6 +23,16 @@ type
     procedure TestLoadAllNotesSkipsCorrupted;
     [Test]
     procedure TestSaveNoteFailureSafety;
+    [Test]
+    procedure TestSaveWritesSchemaVersion;
+    [Test]
+    procedure TestLoadLegacyUnversionedNote;
+    [Test]
+    procedure TestLoadExplicitSchemaVersion1;
+    [Test]
+    procedure TestFutureSchemaVersionSkippedAndPreserved;
+    [Test]
+    procedure TestInvalidSchemaVersionSkippedAndPreserved;
   end;
 
 implementation
@@ -317,6 +327,240 @@ begin
     finally
       Note.Free;
     end;
+  finally
+    Storage.Free;
+    if TDirectory.Exists(TempDir) then
+      TDirectory.Delete(TempDir, True);
+  end;
+end;
+
+procedure TJsonStorageTestFixture.TestSaveWritesSchemaVersion;
+var
+  Storage: TJsonStorage;
+  Note: TNote;
+  FileName, JsonText, TempDir: string;
+  Json: TJSONValue;
+  Pair: TJSONPair;
+begin
+  TempDir := TPath.GetTempPath + 'StickyNotes_SchemaWriteTest_';
+  if TDirectory.Exists(TempDir) then
+    TDirectory.Delete(TempDir, True);
+
+  Storage := TJsonStorage.Create(TempDir);
+  try
+    Note := TNote.Create(1, 'Schema', 'Version test', ncYellow);
+    try
+      Assert.IsTrue(Storage.SaveNote(Note), 'SaveNote should succeed');
+      FileName := TPath.Combine(TempDir, 'notes\0000000001.json');
+      Assert.IsTrue(TFile.Exists(FileName), 'Note file should exist');
+
+      JsonText := TFile.ReadAllText(FileName, TEncoding.UTF8);
+      Json := TJSONObject.ParseJSONValue(JsonText);
+      try
+        Assert.IsNotNull(Json, 'Saved file should be valid JSON');
+        Pair := (Json as TJSONObject).Get('schemaVersion');
+        Assert.IsNotNull(Pair, 'Saved JSON must contain schemaVersion');
+        Assert.IsTrue(Pair.JsonValue is TJSONNumber, 'schemaVersion must be a JSON number');
+        Assert.AreEqual<Int64>(1, (Pair.JsonValue as TJSONNumber).AsInt64,
+          'schemaVersion must equal the current schema version (1)');
+      finally
+        Json.Free;
+      end;
+    finally
+      Note.Free;
+    end;
+  finally
+    Storage.Free;
+    if TDirectory.Exists(TempDir) then
+      TDirectory.Delete(TempDir, True);
+  end;
+end;
+
+procedure TJsonStorageTestFixture.TestLoadLegacyUnversionedNote;
+var
+  Storage: TJsonStorage;
+  NotesDir, FileName, LegacyJson, OriginalContent, TempDir: string;
+  LoadedNotes: TObjectList<TNote>;
+  Note: TNote;
+begin
+  TempDir := TPath.GetTempPath + 'StickyNotes_LegacyTest_';
+  if TDirectory.Exists(TempDir) then
+    TDirectory.Delete(TempDir, True);
+
+  Storage := TJsonStorage.Create(TempDir);
+  try
+    NotesDir := TPath.Combine(TempDir, 'notes');
+    TDirectory.CreateDirectory(NotesDir);
+    FileName := TPath.Combine(NotesDir, '0000000007.json');
+
+    // Actual pre-versioning format: no schemaVersion field
+    LegacyJson :=
+      '{"ID":7,"Title":"Legacy Title","Content":"Legacy Content",' +
+      '"Color":2,"Left":150,"Top":200,"Width":320,"Height":280,' +
+      '"AlwaysOnTop":true,"Collapsed":false,"Locked":true,' +
+      '"CreatedAt":"2024-01-15T10:30:00","UpdatedAt":"2024-01-16T11:45:00"}';
+    TFile.WriteAllText(FileName, LegacyJson, TEncoding.UTF8);
+    OriginalContent := TFile.ReadAllText(FileName, TEncoding.UTF8);
+
+    LoadedNotes := Storage.LoadAllNotes;
+    try
+      Assert.AreEqual<Integer>(1, LoadedNotes.Count, 'Legacy note should load successfully');
+      Note := LoadedNotes[0];
+      Assert.AreEqual<Int64>(7, Note.ID);
+      Assert.AreEqual<string>('Legacy Title', Note.Title);
+      Assert.AreEqual<string>('Legacy Content', Note.Content);
+      Assert.AreEqual<TNoteColor>(ncBlue, Note.Color);
+      Assert.AreEqual<Integer>(150, Note.Left);
+      Assert.AreEqual<Integer>(200, Note.Top);
+      Assert.AreEqual<Integer>(320, Note.Width);
+      Assert.AreEqual<Integer>(280, Note.Height);
+      Assert.IsTrue(Note.AlwaysOnTop, 'AlwaysOnTop should be preserved');
+      Assert.IsFalse(Note.Collapsed, 'Collapsed should be preserved');
+      Assert.IsTrue(Note.Locked, 'Locked should be preserved');
+    finally
+      LoadedNotes.Free;
+    end;
+
+    // Loading must NOT rewrite the legacy file
+    Assert.AreEqual<string>(OriginalContent,
+      TFile.ReadAllText(FileName, TEncoding.UTF8),
+      'Loading a legacy file must not modify it');
+  finally
+    Storage.Free;
+    if TDirectory.Exists(TempDir) then
+      TDirectory.Delete(TempDir, True);
+  end;
+end;
+
+procedure TJsonStorageTestFixture.TestLoadExplicitSchemaVersion1;
+var
+  Storage: TJsonStorage;
+  NotesDir, FileName, TempDir: string;
+  LoadedNotes: TObjectList<TNote>;
+begin
+  TempDir := TPath.GetTempPath + 'StickyNotes_SchemaV1Test_';
+  if TDirectory.Exists(TempDir) then
+    TDirectory.Delete(TempDir, True);
+
+  Storage := TJsonStorage.Create(TempDir);
+  try
+    NotesDir := TPath.Combine(TempDir, 'notes');
+    TDirectory.CreateDirectory(NotesDir);
+    FileName := TPath.Combine(NotesDir, '0000000005.json');
+    TFile.WriteAllText(FileName,
+      '{"schemaVersion":1,"ID":5,"Title":"V1 Note","Content":"Explicit",' +
+      '"Color":1,"Left":100,"Top":100,"Width":300,"Height":250,' +
+      '"AlwaysOnTop":false,"Collapsed":false,"Locked":false,' +
+      '"CreatedAt":"2024-06-01T08:00:00","UpdatedAt":"2024-06-01T08:00:00"}',
+      TEncoding.UTF8);
+
+    LoadedNotes := Storage.LoadAllNotes;
+    try
+      Assert.AreEqual<Integer>(1, LoadedNotes.Count, 'Explicit v1 note should load');
+      Assert.AreEqual<Int64>(5, LoadedNotes[0].ID);
+      Assert.AreEqual<string>('V1 Note', LoadedNotes[0].Title);
+      Assert.AreEqual<TNoteColor>(ncGreen, LoadedNotes[0].Color);
+    finally
+      LoadedNotes.Free;
+    end;
+  finally
+    Storage.Free;
+    if TDirectory.Exists(TempDir) then
+      TDirectory.Delete(TempDir, True);
+  end;
+end;
+
+procedure TJsonStorageTestFixture.TestFutureSchemaVersionSkippedAndPreserved;
+var
+  Storage: TJsonStorage;
+  NotesDir, FutureFile, FutureContent, TempDir: string;
+  Note: TNote;
+  LoadedNotes: TObjectList<TNote>;
+begin
+  TempDir := TPath.GetTempPath + 'StickyNotes_FutureSchemaTest_';
+  if TDirectory.Exists(TempDir) then
+    TDirectory.Delete(TempDir, True);
+
+  Storage := TJsonStorage.Create(TempDir);
+  try
+    NotesDir := TPath.Combine(TempDir, 'notes');
+    TDirectory.CreateDirectory(NotesDir);
+
+    // A note from a future application version
+    FutureFile := TPath.Combine(NotesDir, '0000000002.json');
+    TFile.WriteAllText(FutureFile,
+      '{"schemaVersion":999,"ID":2,"Title":"Future","Content":"Future","Color":0,' +
+      '"Left":100,"Top":100,"Width":300,"Height":250,"AlwaysOnTop":false,' +
+      '"Collapsed":false,"Locked":false,"CreatedAt":"2024-01-01T00:00:00",' +
+      '"UpdatedAt":"2024-01-01T00:00:00"}', TEncoding.UTF8);
+    FutureContent := TFile.ReadAllText(FutureFile, TEncoding.UTF8);
+
+    // A normal current-version note alongside it
+    Note := TNote.Create(1, 'Valid', 'Valid note', ncYellow);
+    try
+      Assert.IsTrue(Storage.SaveNote(Note), 'Saving a valid note should succeed');
+    finally
+      Note.Free;
+    end;
+
+    LoadedNotes := Storage.LoadAllNotes;
+    try
+      // Future-version file skipped; valid file still loaded
+      Assert.AreEqual<Integer>(1, LoadedNotes.Count,
+        'Only the valid note should load; the future-version note must be skipped');
+      Assert.AreEqual<Int64>(1, LoadedNotes[0].ID);
+    finally
+      LoadedNotes.Free;
+    end;
+
+    // The future-version file must remain intact
+    Assert.IsTrue(TFile.Exists(FutureFile), 'Future-version file must not be deleted');
+    Assert.AreEqual<string>(FutureContent,
+      TFile.ReadAllText(FutureFile, TEncoding.UTF8),
+      'Future-version file must not be modified');
+  finally
+    Storage.Free;
+    if TDirectory.Exists(TempDir) then
+      TDirectory.Delete(TempDir, True);
+  end;
+end;
+
+procedure TJsonStorageTestFixture.TestInvalidSchemaVersionSkippedAndPreserved;
+var
+  Storage: TJsonStorage;
+  NotesDir, BadFile, BadContent, TempDir: string;
+  LoadedNotes: TObjectList<TNote>;
+begin
+  TempDir := TPath.GetTempPath + 'StickyNotes_InvalidSchemaTest_';
+  if TDirectory.Exists(TempDir) then
+    TDirectory.Delete(TempDir, True);
+
+  Storage := TJsonStorage.Create(TempDir);
+  try
+    NotesDir := TPath.Combine(TempDir, 'notes');
+    TDirectory.CreateDirectory(NotesDir);
+
+    // Malformed schemaVersion: string instead of integer
+    BadFile := TPath.Combine(NotesDir, '0000000003.json');
+    TFile.WriteAllText(BadFile,
+      '{"schemaVersion":"abc","ID":3,"Title":"Bad","Content":"Bad","Color":0,' +
+      '"Left":100,"Top":100,"Width":300,"Height":250,"AlwaysOnTop":false,' +
+      '"Collapsed":false,"Locked":false,"CreatedAt":"2024-01-01T00:00:00",' +
+      '"UpdatedAt":"2024-01-01T00:00:00"}', TEncoding.UTF8);
+    BadContent := TFile.ReadAllText(BadFile, TEncoding.UTF8);
+
+    LoadedNotes := Storage.LoadAllNotes;
+    try
+      Assert.AreEqual<Integer>(0, LoadedNotes.Count,
+        'Invalid schemaVersion must be safely rejected, not loaded');
+    finally
+      LoadedNotes.Free;
+    end;
+
+    Assert.IsTrue(TFile.Exists(BadFile), 'Invalid-schema file must not be deleted');
+    Assert.AreEqual<string>(BadContent,
+      TFile.ReadAllText(BadFile, TEncoding.UTF8),
+      'Invalid-schema file must not be modified');
   finally
     Storage.Free;
     if TDirectory.Exists(TempDir) then

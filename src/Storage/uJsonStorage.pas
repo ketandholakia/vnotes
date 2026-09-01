@@ -8,7 +8,19 @@ uses
   uStorage, uNote, uEnums, uILogger;
 
 type
+  // Raised when a JSON note file carries a schema version that this build
+  // cannot safely interpret (future version, negative value, wrong JSON type).
+  // The file itself is never modified or deleted when this is raised.
+  EJsonSchemaException = class(Exception);
+
   TJsonStorage = class(TInterfacedObject, INoteStorage)
+  private
+    const
+      // Schema version of the JSON written by this build.
+      CURRENT_SCHEMA_VERSION = 1;
+      // Unversioned (pre-versioning) files are interpreted as schema 0.
+      LEGACY_SCHEMA_VERSION = 0;
+      SCHEMA_VERSION_FIELD = 'schemaVersion';
   private
     FBasePath: string;
     FNotesPath: string;
@@ -100,6 +112,7 @@ end;
 function TJsonStorage.NoteToJson(const ANote: TNote): TJSONObject;
 begin
   Result := TJSONObject.Create;
+  Result.AddPair(SCHEMA_VERSION_FIELD, TJSONNumber.Create(CURRENT_SCHEMA_VERSION));
   Result.AddPair('ID', TJSONNumber.Create(ANote.ID));
   Result.AddPair('Title', TJSONString.Create(ANote.Title));
   Result.AddPair('Content', TJSONString.Create(ANote.Content));
@@ -121,9 +134,41 @@ var
   ColorInt: Integer;
   CreatedStr, UpdatedStr: string;
   Val: TJSONValue;
+  SchemaVal: TJSONValue;
+  SchemaVersion: Int64;
+  Logger: ILogger;
 begin
   if AJson = nil then
     raise Exception.Create('JsonToNote: AJson is nil');
+
+  // --- Schema version inspection -------------------------------------------
+  // Missing schemaVersion  -> legacy (unversioned) format, treated as v0 and
+  //                           read with the legacy field mapping below.
+  // schemaVersion = 1      -> current format.
+  // schemaVersion < 0      -> invalid, reject.
+  // schemaVersion > 1      -> future format, reject safely (never touched).
+  // wrong JSON type        -> invalid metadata, reject safely.
+  Logger := CreateLogger;
+  SchemaVal := AJson.GetValue(SCHEMA_VERSION_FIELD);
+  if SchemaVal = nil then
+    Logger.Info('JsonToNote: Unversioned (legacy) JSON detected, interpreting as schema version 0')
+  else if SchemaVal is TJSONNumber then
+  begin
+    SchemaVersion := (SchemaVal as TJSONNumber).AsInt64;
+    if SchemaVersion < LEGACY_SCHEMA_VERSION then
+      raise EJsonSchemaException.CreateFmt(
+        'JsonToNote: Invalid schema version %d (negative versions are not supported)', [SchemaVersion]);
+    if SchemaVersion > CURRENT_SCHEMA_VERSION then
+      raise EJsonSchemaException.CreateFmt(
+        'JsonToNote: Unsupported future schema version %d (this build supports up to %d)',
+        [SchemaVersion, CURRENT_SCHEMA_VERSION]);
+    // Version 0 stored explicitly is handled identically to legacy/unversioned.
+    if SchemaVersion = LEGACY_SCHEMA_VERSION then
+      Logger.Info('JsonToNote: Legacy schema version 0 detected, using legacy compatibility reader');
+  end
+  else
+    raise EJsonSchemaException.Create(
+      'JsonToNote: Invalid schema version metadata (must be an integer)');
 
   Note := TNote.Create;
   try
@@ -325,6 +370,10 @@ begin
           Json.Free;
         end
       except
+        on E: EJsonSchemaException do
+          // Unsupported/invalid schema version: skip and log, but never
+          // modify or delete the original file.
+          Logger.Warning(Format('LoadAllNotes: Unsupported or invalid schema in file %s (file preserved): %s', [ExtractFileName(FileName), E.Message]));
         on E: Exception do
           Logger.Warning(Format('LoadAllNotes: Corrupted JSON skipped for file %s: %s', [ExtractFileName(FileName), E.Message]));
       end;
