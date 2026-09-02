@@ -9,12 +9,12 @@ A lightweight desktop sticky notes application for Windows, built with Delphi us
 - **Always on Top** - Keep notes visible above other windows
 - **Collapse** - Minimize to header only
 - **Lock** - Prevent accidental edits
-- **Global hotkeys** - `Ctrl+Alt+N` for new note (`Ctrl+Alt+F` for search is **planned**, not yet wired to a search UI)
+- **Global hotkeys** - `Ctrl+Alt+N` for new note, `Ctrl+Alt+F` opens the Notes List with in-memory search
 - **Auto-save** - Debounced save (1 second default) on typing, moving, resizing
 - **Light/Dark theme** - Windows 10 / Windows 10 Dark styles
 - **Auto-start** - Launch with Windows
 - **Backup & Restore** - ZIP-based backups
-- **Multi-monitor support** - Partial (notes restore to their last monitor; no clamp-to-monitor logic yet)
+- **Multi-monitor support** - Notes are restored clamped into a visible monitor work area (positions saved off-screen are moved back on launch; the corrected position is re-clamped on every start)
 - **JSON storage** - One file per note, easy to sync with Git/Dropbox/OneDrive
 
 ## Architecture
@@ -73,7 +73,7 @@ Each note is an independent JSON file - corruption affects only one note, easy t
 | Action | Default | Status |
 |--------|---------|--------|
 | New Note | `Ctrl+Alt+N` | Implemented |
-| Search Notes | `Ctrl+Alt+F` | **Planned (Phase 4B)** - hotkey registered, but no search form yet; currently falls back to re-showing note windows |
+| Search Notes | `Ctrl+Alt+F` | Implemented - opens the Notes List (Title/Content search) and focuses the search box |
 
 Configurable in Settings → Hotkeys.
 

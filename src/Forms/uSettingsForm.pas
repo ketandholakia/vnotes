@@ -50,6 +50,7 @@ type
     udBackupInterval: TUpDown;
     procedure FormCreate(Sender: TObject);
     procedure FormShow(Sender: TObject);
+    procedure FormClose(Sender: TObject; var Action: TCloseAction);
     procedure btnOKClick(Sender: TObject);
     procedure btnCancelClick(Sender: TObject);
     procedure btnApplyClick(Sender: TObject);
@@ -63,6 +64,7 @@ type
   public
     procedure LoadSettings(ASettings: TSettings);
     procedure SaveSettings(ASettings: TSettings);
+    destructor Destroy; override;
   end;
 
 var
@@ -85,22 +87,43 @@ begin
   for C := Low(TNoteColor) to High(TNoteColor) do
     cbDefaultColor.Items.Add(NoteColorToName(C));
   cbDefaultColor.Style := csDropDownList;
-  
+
   // Setup up/down controls
   udAutosaveDelay.Min := 100;
   udAutosaveDelay.Max := 60000;
   udAutosaveDelay.Increment := 100;
-  
+
   udBackupInterval.Min := 1;
   udBackupInterval.Max := 30;
   udBackupInterval.Increment := 1;
-  
+
+  // Phase 4C: snapshot for the Cancel rollback path. Allocated once
+  // per form instance and refreshed by LoadSettings. Released in
+  // Destroy (declared on the class) so we do not leak one TSettings
+  // per visit to the Settings dialog.
   FOriginalSettings := TSettings.Create;
+end;
+
+destructor TSettingsForm.Destroy;
+begin
+  FreeAndNil(FOriginalSettings);
+  inherited;
 end;
 
 procedure TSettingsForm.FormShow(Sender: TObject);
 begin
   LoadControls;
+end;
+
+procedure TSettingsForm.FormClose(Sender: TObject; var Action: TCloseAction);
+begin
+  // Phase 4C: any non-OK close path (Cancel button, Esc key, X button,
+  // Alt+F4) must roll the in-memory settings back to the snapshot.
+  // btnCancelClick already does this for the explicit Cancel click,
+  // but the other paths bypass it. Centralise the rollback here so the
+  // dialog is safe regardless of how it is dismissed.
+  if (ModalResult <> mrOk) and Assigned(FSettings) and Assigned(FOriginalSettings) then
+    FSettings.Assign(FOriginalSettings);
 end;
 
 procedure TSettingsForm.LoadSettings(ASettings: TSettings);
@@ -171,7 +194,8 @@ end;
 
 procedure TSettingsForm.btnCancelClick(Sender: TObject);
 begin
-  FSettings.Assign(FOriginalSettings);
+  // Phase 4C: rollback is centralised in FormClose so all non-OK
+  // dismiss paths are covered uniformly.
   ModalResult := mrCancel;
 end;
 
