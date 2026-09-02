@@ -7,7 +7,7 @@ uses
   Vcl.Forms;
 
 type
-  THotkeyID = (hkNewNote, hkSearch, hkCustom1, hkCustom2, hkCustom3);
+  THotkeyID = (hkNewNote, hkSearch);
   THotkeyEvent = procedure of object;
 
   THotkeyService = class
@@ -31,14 +31,10 @@ type
     function UnregisterHotkey(AID: THotkeyID): Boolean;
     procedure SetHotkey(AID: THotkeyID; const AHotkeyStr: string; AEvent: THotkeyEvent);
     procedure EnableHotkey(AID: THotkeyID; AEnable: Boolean);
-    procedure UpdateFromSettings;
     procedure HandleMessage(var Message: TMessage);  // Public method for message handling
   end;
 
 implementation
-
-uses
-  uSettings;
 
 const
   HOTKEY_MSG = WM_HOTKEY;
@@ -183,11 +179,6 @@ begin
     RegisterHotkey(AID, FHotkeys[AID].HotkeyStr, FHotkeys[AID].Event)
   else if not AEnable and FHotkeys[AID].Enabled then
     UnregisterHotkey(AID);
-end;
-
-procedure THotkeyService.UpdateFromSettings;
-begin
-  // Will be called with settings object to update hotkeys
 end;
 
 procedure THotkeyService.WndProc(var Message: TMessage);

@@ -119,7 +119,6 @@
         <DCCReference Include="Models\uSettings.pas"/>
         <DCCReference Include="Models\uEnums.pas"/>
         <DCCReference Include="Controllers\uNoteManager.pas"/>
-        <DCCReference Include="Controllers\uTrayController.pas"/>
         <DCCReference Include="Controllers\uSettingsController.pas"/>
         <DCCReference Include="Storage\uStorage.pas"/>
         <DCCReference Include="Storage\uJsonStorage.pas"/>

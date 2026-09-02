@@ -13,7 +13,8 @@ A lightweight desktop sticky notes application for Windows, built with Delphi us
 - **Auto-save** - Debounced save (1 second default) on typing, moving, resizing
 - **Light/Dark theme** - Windows 10 / Windows 10 Dark styles
 - **Auto-start** - Launch with Windows
-- **Backup & Restore** - ZIP-based backups
+- **Backup & Restore** - ZIP-based backups with scheduled automatic backups (interval configurable in Settings)
+- **Single instance** - launching a second copy signals the running app (surfaces the Notes List) and exits
 - **Multi-monitor support** - Notes are restored clamped into a visible monitor work area (positions saved off-screen are moved back on launch; the corrected position is re-clamped on every start)
 - **JSON storage** - One file per note, easy to sync with Git/Dropbox/OneDrive
 

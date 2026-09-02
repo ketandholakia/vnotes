@@ -77,7 +77,6 @@ type
     procedure ApplyColor;
     procedure UpdateUI;
     procedure ApplyTheme;
-    procedure WndProc(var Message: TMessage); override;
     procedure WMNCHitTest(var Message: TWMNCHitTest); message WM_NCHITTEST;
     procedure WMGetMinMaxInfo(var Message: TWMGetMinMaxInfo); message WM_GETMINMAXINFO;
   public
@@ -512,12 +511,6 @@ begin
     mmContent.Font.Size := Max(8, Min(24, mmContent.Font.Size + WheelDelta div 120));
     Handled := True;
   end;
-end;
-
-procedure TNoteForm.WndProc(var Message: TMessage);
-begin
-  inherited;
-  // Handle any custom messages
 end;
 
 procedure TNoteForm.WMNCHitTest(var Message: TWMNCHitTest);
