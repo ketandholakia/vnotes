@@ -6,7 +6,7 @@ uses
   Winapi.Windows, Winapi.Messages, Winapi.ShlObj, System.SysUtils, System.Classes,
   System.Generics.Collections,
   Vcl.Graphics, Vcl.Controls, Vcl.Forms, Vcl.Dialogs, Vcl.ExtCtrls, Vcl.Menus,
-  uNote, uNoteManager, uSettings, uTrayController, uSettingsController,
+  uNote, uNoteManager, uSettings, uSettingsController,
   uAutosaveService, uHotkeyService, uThemeService, uBackupService,
   uStorage, uNoteQuery, uNoteForm, uNoteApplication, uNoteEditorContext,
   uNotesListForm;
@@ -43,9 +43,6 @@ type
     // Cached handle of the registered "another instance appeared" message.
     FAppearMessage: UINT;
 
-    // NOTE: FTrayController is constructed but never shown (the dfm-wired
-    // tiMain/pmTray is the active tray UI). Preserved as dead code.
-    FTrayController: TTrayController;
     procedure SetupHotkeys;
     procedure NoteFormClosed(Sender: TObject);
     procedure OnNewNote(Sender: TObject);
@@ -104,17 +101,6 @@ begin
   // In-memory search (Phase 4B)
   FNoteQuery := TNoteQuery.Create;
 
-  // Create FTrayController (unused – see declaration comment)
-  FTrayController := TTrayController.Create(
-    FApplication.NoteManager, FApplication.Settings);
-  FTrayController.OnNewNote := OnNewNote;
-  FTrayController.OnOpenNotesList := OnOpenNotesList;
-  FTrayController.OnSettings := OnSettings;
-  FTrayController.OnBackup := OnBackup;
-  FTrayController.OnRestore := OnRestore;
-  FTrayController.OnAbout := OnAbout;
-  FTrayController.OnExit := OnExit;
-
   // Setup hotkeys (needs form methods as callbacks)
   SetupHotkeys;
 
@@ -136,7 +122,6 @@ begin
   SaveAllNotes;
   CloseAllNotes;
 
-  FTrayController.Free;
   FApplication.Free;   // TNoteApplication.Destroy calls Shutdown internally
   FNoteForms.Free;
 end;

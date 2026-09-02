@@ -15,7 +15,6 @@ uses
   uSettings in 'Models\uSettings.pas',
   uEnums in 'Models\uEnums.pas',
   uNoteManager in 'Controllers\uNoteManager.pas',
-  uTrayController in 'Controllers\uTrayController.pas',
   uSettingsController in 'Controllers\uSettingsController.pas',
   uStorage in 'Storage\uStorage.pas',
   uJsonStorage in 'Storage\uJsonStorage.pas',

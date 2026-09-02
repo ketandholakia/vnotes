@@ -500,6 +500,41 @@ While integrating, a **suspected pre-existing double-open on new notes** was not
 - SQLite (deferred per Phase 3C/4A decisions)
 - Phase 4D
 
+## Phase 4D — Dead Code Removal & Doc Sync — COMPLETE + VALIDATED (2026-09-02)
+
+> **Status:** **COMPLETE + VALIDATED** — all four dead-code targets removed, acceptance grep returns 0 references in `src/`, build/test/MSBuild all PASS, manual GUI smoke test PASS, README and this plan synchronized. No new behavior added; no new tests required.
+
+### What Changed
+
+- [x] **`TTrayController` removed** — `src/Controllers/uTrayController.pas` deleted (dead since Phase 4B: the DFM-wired `tiMain`/`pmTray` is the live tray UI; `ShowTrayIcon` was never called). Construct/wire/free removed from `uTrayForm.pas`; `uTrayController` unit removed from `StickyNotes.dpr` and `StickyNotes.dproj`. Not reused by 4B (recently-modified sort lives in `INoteQuery`), so the removal path of the action plan applied.
+- [x] **Unused hotkey IDs removed** — `hkCustom1/2/3` deleted from `THotkeyID` (`uHotkeyService.pas`); no references existed outside the enum.
+- [x] **`THotkeyService.UpdateFromSettings` removed** — empty stub, zero callers in `src/` or `tests/` (re-confirmed before removal). The now-dead `uses uSettings` dependency of that stub was also removed. Live hotkey message handling (`THotkeyService.WndProc`, `HandleMessage`) untouched.
+- [x] **`TNoteForm.WndProc` removed** — no-op `inherited` override. `THotkeyService.WndProc` and `TTrayForm.WndProc` (live message routers) untouched.
+- [x] **Acceptance criterion met** — `grep -rn "TTrayController\|hkCustom\|UpdateFromSettings" src/` returns **0 matches** in tracked source (only gitignored `__history` IDE backups mentioned the removed unit, plus a stale `.dcu` deleted with it).
+
+### Documentation Synchronization
+
+- [x] **README.md** — added the two shipped-but-undocumented behaviors: scheduled automatic backups and single-instance behavior. (Search/Notes List and multi-monitor clamping were already synchronized during the Phase 4C finalization.)
+- [x] **Reality vs. the older 4C action-plan wishlist** — recorded here for accuracy: Phase 4C as shipped implemented the single-instance guard, scheduled backup scheduler, Settings Cancel/Esc/X rollback, snapshot leak fix, monitor clamping, `Winapi.MultiMon` repair, and 29 new tests. It did **NOT** implement the action plan's 4C items for backup retention, persisted last-backup time across restarts (`TBackupScheduler.FLastBackupAt` is in-memory only), hotkey-failure surfacing, title-in-note-UI, `TBackupServiceTests`, or `TNoteManagerTests`. These remain unimplemented (retention/persistence are follow-up candidates); no future session should mistake the wishlist for shipped work.
+
+### Validation Results (2026-09-02, plain shell — no RAD Studio prompt)
+
+| # | Check | Result |
+|---|-------|--------|
+| 1 | `build.bat` (Win32 Debug, dcc32 v36.0) | **PASS** — 0 errors |
+| 2 | `build_tests.bat` + run | **PASS** — 67/67 PASS, 0 Failed / 0 Errored / 0 Leaked (no new tests needed; removals carry no behavior) |
+| 3 | `msbuild src\StickyNotes.dproj /t:Build /p:Config=Debug /p:Platform=Win32` | **PASS** — 0 errors |
+| 4 | Acceptance grep | **PASS** — 0 references in `src/` |
+| 5 | `git diff --check` | **PASS** |
+| 6 | Manual GUI smoke test | **PASS** — launch, tray icon + context menu, `Ctrl+Alt+N`, `Ctrl+Alt+F` Notes List + search, open-from-list, Settings OK/Cancel, clean exit |
+
+### Out of Scope (unchanged)
+
+- New-note double-open fix (confirmed in 4C; deferred)
+- Monitor-clamp position persistence
+- Backup retention / persisted last-backup time / hotkey-failure surfacing / title-in-note-UI (unimplemented action-plan wishlist items above)
+- SQLite; high-DPI (explicitly excluded from the 4A.5→4D arc)
+
 ---
 
 *Document created: 2026-08-31*
