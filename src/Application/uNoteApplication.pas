@@ -8,6 +8,7 @@ uses
   System.IOUtils,
   uNote, uNoteManager, uSettings, uSettingsController,
   uAutosaveService, uHotkeyService, uThemeService, uBackupService,
+  uBackupScheduler,
   uStorage, uJsonStorage;
 
 type
@@ -19,6 +20,7 @@ type
     FHotkeyService: THotkeyService;
     FThemeService: TThemeService;
     FBackupService: TBackupService;
+    FBackupScheduler: TBackupScheduler;
     FStorage: INoteStorage;
     FAppDataPath: string;
 
@@ -35,6 +37,9 @@ type
     destructor Destroy; override;
     procedure Initialize;
     procedure Shutdown;
+    // Refresh the periodic backup schedule from current settings.
+    // Called by the tray form after the user OKs new settings.
+    procedure RefreshBackupSchedule;
 
     property NoteManager: TNoteManager read FNoteManager;
     property Settings: TSettings read GetSettings;
@@ -42,6 +47,7 @@ type
     property AutosaveService: TAutosaveService read FAutosaveService;
     property HotkeyService: THotkeyService read FHotkeyService;
     property BackupService: TBackupService read FBackupService;
+    property BackupScheduler: TBackupScheduler read FBackupScheduler;
     property AppDataPath: string read FAppDataPath;
 
     property OnNoteCreated: TNoteEvent read FOnNoteCreated write FOnNoteCreated;
@@ -75,6 +81,13 @@ begin
     FSettingsController.GetSettings,
     TPath.Combine(FAppDataPath, 'backups'));
 
+  // Phase 4C: scheduled backups. Owns its timer; started in Initialize
+  // after settings are loaded so the current BackupEnabled/IntervalDays
+  // values are honoured. Stopped in Shutdown.
+  FBackupScheduler := TBackupScheduler.Create(
+    FBackupService,
+    FSettingsController.GetSettings);
+
   FAutosaveService.OnSave := procedure(ANote: TNote)
     begin
       FNoteManager.SaveNote(ANote);
@@ -84,6 +97,7 @@ end;
 destructor TNoteApplication.Destroy;
 begin
   Shutdown;
+  FBackupScheduler.Free;
   FBackupService.Free;
   FNoteManager.Free;
   FHotkeyService.Free;
@@ -103,13 +117,25 @@ begin
   FNoteManager.OnNoteDeleted := FOnNoteDeleted;
 
   FNoteManager.Initialize;
+
+  // Phase 4C: arm the periodic backup schedule with the loaded settings.
+  if FBackupScheduler <> nil then
+    FBackupScheduler.Start;
 end;
 
 procedure TNoteApplication.Shutdown;
 begin
+  if FBackupScheduler <> nil then
+    FBackupScheduler.Stop;
   FAutosaveService.Flush;
   SaveSettings;
   FNoteManager.Finalize;
+end;
+
+procedure TNoteApplication.RefreshBackupSchedule;
+begin
+  if FBackupScheduler <> nil then
+    FBackupScheduler.Refresh;
 end;
 
 function TNoteApplication.GetAppDataPath: string;

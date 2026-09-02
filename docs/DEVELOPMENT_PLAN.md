@@ -459,6 +459,47 @@ Hotkey `Ctrl+Alt+F` focus/select-all; open list from tray menu; typing filters; 
 
 While integrating, a **suspected pre-existing double-open on new notes** was noticed: `TTrayForm.OnNewNote` calls `NoteManager.CreateNote` (which fires `OnNoteCreated` -> `CreateNoteForm`) and *then* calls `CreateNoteForm(Note)` explicitly again - likely opening two windows per new note. Unverified at runtime; predates Phase 4B; left untouched per scope guardrails.
 
+## Phase 4C — Reliability & Lifecycle Polish — COMPLETE + VALIDATED (2026-09-02)
+
+> **Status:** **COMPLETE + VALIDATED** — runtime/IDE validation blockers resolved, 67/67 tests PASS (38 baseline + 29 new), `build.bat` / `build_tests.bat` / MSBuild all PASS, full manual GUI smoke test completed. **No commit made** (awaiting review). No SQLite work; no Phase 4D work.
+
+### What Changed
+
+- [x] **Single-instance guard** (`src/Utils/uSingleInstance.pas`, new) — second launch signals the running instance (which surfaces the Notes List) and exits cleanly before `Application.Initialize`. Verified at runtime: second process exits, first instance surfaces the list.
+- [x] **Scheduled backup scheduler** (`src/Services/uBackupScheduler.pas`, new) — periodic timer-based backup scheduling; `Start`/`Stop`/`Refresh`/`TickNow` lifecycle; interval re-armed from settings.
+- [x] **Settings Cancel/Esc/X rollback** — `TSettingsForm` closes via Cancel/Esc/X without persisting changes; verified at runtime that `settings.ini` keeps original values and a reopened dialog shows them restored.
+- [x] **Settings snapshot leak fix** — settings snapshots no longer leaked between dialog sessions.
+- [x] **Monitor-aware note-position clamping** (`src/Utils/uMonitorUtils.pas` + `TNoteForm.FormShow`) — pure, unit-testable `IsRectOnAnyWorkArea`/`EnsureRectVisible` helpers plus a `Screen`-backed wrapper; a note restored fully off-screen is moved into the nearest work area at `FormShow`. Verified at runtime with a note placed at (-3000,-3000).
+- [x] **`uMonitorUtils` repaired / `Winapi.MultiMon` dependency** — added `Winapi.MultiMon` to its `uses` (monitor API moved out of `Winapi.Windows` in Delphi 12), resolving the deferred 4A.5 compile failure; unit re-registered in the .dproj.
+- [x] **Tray second-instance signaling** — the running instance surfaces the Notes List when a second launch attempts to start.
+- [x] **Backup scheduler lifecycle & refresh** — created/destroyed by `TNoteApplication`; `TTrayForm.OnSettings` OK path calls `FApplication.RefreshBackupSchedule` to honour changed backup settings (verified at runtime: IntervalDays change persisted and scheduler refreshed).
+- [x] **29 new tests** (`tests/Models/TBackupSchedulerTests.pas`, `TMonitorUtilsTests.pas`, `TSingleInstanceTests.pas`) — total suite now 67/67 PASS, 0 Failed / 0 Errored / 0 Leaked.
+- [x] **Windows10 VCL style/resource issue resolved** — root cause: styles were embedded twice (IDE-managed `StickyNotes.res` plus a manual `Resources\VCLStyles.res`), so `TStyleManager` auto-discovery raised `EDuplicateStyleException` at startup. Fix: removed the manual `{$R 'Resources\VCLStyles.res' …}` link from `StickyNotes.dpr`; the IDE-managed project `.res` is the single VCL style source. Verified: app launches with no error dialog and `Windows10`/`Windows10 Dark` each registered exactly once.
+- [x] **Delphi IDE Save/Save All verified** — project opened in Delphi 12.2, project marked modified, Save All rewrote the .dproj with no access violation (the previously observed AV corresponded to the old non-canonical project file replaced in this changeset). Also added the missing `DCC_UnitSearchPath` (Models;Controllers;Storage;Services;Utils;Forms) to `StickyNotes.dproj`, fixing MSBuild (`uMonitorUtils` not found).
+- [x] **Tray PopupMenu defect fixed** — `tiMain: TTrayIcon` in `uTrayForm.dfm` was missing `PopupMenu = pmTray`, so the tray icon had no context menu at all (Settings/Backup/Exit unreachable). One-line DFM fix; full tray menu verified at runtime.
+
+### Validation Results (2026-09-02, plain shell — no RAD Studio prompt)
+
+| # | Check | Result |
+|---|-------|--------|
+| 1 | `build.bat` (Win32 Debug, Delphi 12 / dcc32 v36.0) | **PASS** — 0 errors (pre-existing hints only) |
+| 2 | `build_tests.bat` + run | **PASS** — 67 Found / 67 Passed / 0 Failed / 0 Errored / 0 Leaked / 0 Ignored |
+| 3 | `msbuild src\StickyNotes.dproj /t:Build /p:Config=Debug /p:Platform=Win32` | **PASS** — 0 errors |
+| 4 | Manual GUI smoke test | **PASS** — launch, tray, note create/move/display, `Ctrl+Alt+F` Notes List, search filter/clear, open-from-list, second instance, Settings Cancel/Esc/X, backup settings OK + scheduler refresh, monitor clamp with off-screen note, clean exit + relaunch |
+| 5 | Delphi IDE open + Save All | **PASS** — no AV |
+
+### Known Issues / Observations (accurate as of this phase)
+
+- **New-note double-open CONFIRMED, OUT OF SCOPE / deferred** — runtime test: one `Ctrl+Alt+N` created two note windows and two JSON files. Root cause as suspected in Phase 4B (`TTrayForm.OnNewNote` creates the note, then creates a form again while `OnNoteCreated` also creates one). Deferred to a later phase per scope guardrails.
+- **Clamped coordinates are not immediately persisted** — `TNoteForm.FormShow` corrects an off-screen restore in memory only; the JSON keeps the off-screen coordinates until some other save occurs, and the note is simply re-clamped on every launch. Follow-up candidate; deliberately not changed (persistence out of scope this phase).
+
+### Out of Scope (untouched this phase)
+
+- New-note double-open fix (see Known Issues)
+- Monitor-clamp position persistence
+- SQLite (deferred per Phase 3C/4A decisions)
+- Phase 4D
+
 ---
 
 *Document created: 2026-08-31*

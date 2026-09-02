@@ -12,7 +12,10 @@ uses
   TJsonStorageTests in 'Models\TJsonStorageTests.pas',
   TAutosaveServiceTests in 'Models\TAutosaveServiceTests.pas',
   TNoteApplicationTests in 'Models\TNoteApplicationTests.pas',
-  TNoteQueryTests in 'Models\TNoteQueryTests.pas';
+  TNoteQueryTests in 'Models\TNoteQueryTests.pas',
+  TSingleInstanceTests in 'Models\TSingleInstanceTests.pas',
+  TBackupSchedulerTests in 'Models\TBackupSchedulerTests.pas',
+  TMonitorUtilsTests in 'Models\TMonitorUtilsTests.pas';
 
 var
   runner: ITestRunner;

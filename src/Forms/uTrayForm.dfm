@@ -16,6 +16,7 @@ object TrayForm: TTrayForm
   TextHeight = 15
   object tiMain: TTrayIcon
     Hint = 'Sticky Notes'
+    PopupMenu = pmTray
     Visible = True
     OnDblClick = tiMainDblClick
     Left = 48

@@ -19,6 +19,8 @@
 
 # IDE project-local generated files
 *.local
+*.otares
+*.backup
 *.dsk
 *.dproj.local
 *.dpr.local

@@ -40,6 +40,8 @@ type
     FNoteForms: TList<TNoteForm>;
     FNoteQuery: INoteQuery;
     FNotesListForm: TNotesListForm;
+    // Cached handle of the registered "another instance appeared" message.
+    FAppearMessage: UINT;
 
     // NOTE: FTrayController is constructed but never shown (the dfm-wired
     // tiMain/pmTray is the active tray UI). Preserved as dead code.
@@ -65,6 +67,7 @@ type
     procedure OpenAllNotes;
     procedure CloseAllNotes;
     procedure SaveAllNotes;
+    procedure HandleAppearMessage;
     procedure WndProc(var Message: TMessage); override;
   public
     property App: TNoteApplication read FApplication;
@@ -76,7 +79,7 @@ var
 implementation
 
 uses
-  uSettingsForm, uAboutForm, uJsonStorage, System.IOUtils;
+  uSettingsForm, uAboutForm, uJsonStorage, uSingleInstance, System.IOUtils;
 
 {$R *.dfm}
 
@@ -85,6 +88,7 @@ uses
 procedure TTrayForm.FormCreate(Sender: TObject);
 begin
   FNoteForms := TList<TNoteForm>.Create;
+  FAppearMessage := 0;
 
   // Application orchestration layer (owns all services)
   FApplication := TNoteApplication.Create(Handle);
@@ -162,7 +166,33 @@ begin
   if Assigned(FApplication) and (Message.Msg = WM_HOTKEY) then
     FApplication.HotkeyService.HandleMessage(Message)
   else
-    inherited WndProc(Message);
+  begin
+    // Phase 4C: when a second instance tries to launch, it posts this
+    // registered message to us. Surface the notes list as a friendly
+    // "I'm already here" gesture without forcing the (hidden) tray form
+    // itself to become visible.
+    if FAppearMessage = 0 then
+      FAppearMessage := SingleInstanceAppearMessage;
+    if (FAppearMessage <> 0) and (Message.Msg = FAppearMessage) then
+      HandleAppearMessage
+    else
+      inherited WndProc(Message);
+  end;
+end;
+
+procedure TTrayForm.HandleAppearMessage;
+begin
+  // Bring all open note windows to the front, then show the notes list.
+  // This is a best-effort gesture: it does not interrupt the user with
+  // dialogs or steal focus if there is no visible UI to surface.
+  try
+    if (FApplication <> nil) and (FApplication.NoteManager.NoteCount > 0) then
+      ShowNotesList(True)
+    else
+      ShowNotesList(False);
+  except
+    // Swallow - surfacing the existing instance must never crash the app.
+  end;
 end;
 
 procedure TTrayForm.OnNewNote(Sender: TObject);
@@ -208,6 +238,10 @@ begin
         FApplication.HotkeyService.UnregisterHotkey(hkNewNote);
         FApplication.HotkeyService.UnregisterHotkey(hkSearch);
       end;
+
+      // Phase 4C: re-arm the periodic backup schedule to honour any
+      // changes to BackupEnabled / BackupIntervalDays.
+      FApplication.RefreshBackupSchedule;
 
       FApplication.SaveSettings;
     end;

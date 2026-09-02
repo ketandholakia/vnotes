@@ -14,6 +14,7 @@ object SettingsForm: TSettingsForm
   Position = poScreenCenter
   OnCreate = FormCreate
   OnShow = FormShow
+  OnClose = FormClose
   PixelsPerInch = 96
   TextHeight = 15
   object pcSettings: TPageControl

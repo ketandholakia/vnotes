@@ -1,4 +1,4 @@
-unit uNoteForm;
+﻿unit uNoteForm;
 
 interface
 
@@ -96,8 +96,11 @@ var
 
 implementation
 
+{$R *.dfm}
+
+
 uses
-  Winapi.ShellAPI, uWindowUtils, uColorUtils;
+  Winapi.ShellAPI, uWindowUtils, uColorUtils, uMonitorUtils;
 
 const
   MIN_WIDTH = 200;
@@ -188,8 +191,28 @@ begin
 end;
 
 procedure TNoteForm.FormShow(Sender: TObject);
+var
+  Desired: TRect;
+  Clamped: TRect;
 begin
-  SetBounds(FNote.Left, FNote.Top, FNote.Width, FNote.Height);
+  // Phase 4C: if the note's persisted position lies completely outside
+  // every connected monitor's work area (e.g. monitor was disconnected,
+  // resolution changed, or the note was saved on a now-removed display),
+  // move it into the nearest monitor. Positions that are still visible
+  // are left alone. The clamp preserves size and only nudges origin.
+  Desired := Rect(FNote.Left, FNote.Top,
+                  FNote.Left + FNote.Width, FNote.Top + FNote.Height);
+  if TMonitorUtils.EnsureNoteRectVisible(Desired, Clamped) then
+    SetBounds(FNote.Left, FNote.Top, FNote.Width, FNote.Height)
+  else
+  begin
+    // Clamped position was changed; persist the new coordinates so the
+    // note does not "drift back" to the inaccessible spot on the next
+    // launch.
+    FNote.Left := Clamped.Left;
+    FNote.Top := Clamped.Top;
+    SetBounds(Clamped.Left, Clamped.Top, FNote.Width, FNote.Height);
+  end;
   if FNote.AlwaysOnTop then
     FormStyle := fsStayOnTop;
   if FNote.Collapsed then

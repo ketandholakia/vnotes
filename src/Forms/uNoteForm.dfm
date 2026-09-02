@@ -21,7 +21,6 @@ object NoteForm: TNoteForm
   OnMouseWheel = FormMouseWheel
   OnResize = FormResize
   OnShow = FormShow
-  PixelsPerInch = 96
   TextHeight = 15
   object pnlHeader: TPanel
     Left = 0
@@ -41,7 +40,6 @@ object NoteForm: TNoteForm
       Width = 28
       Height = 28
       Caption = #215
-      Flat = True
       Font.Charset = DEFAULT_CHARSET
       Font.Color = clWindowText
       Font.Height = -16
@@ -56,8 +54,7 @@ object NoteForm: TNoteForm
       Top = 2
       Width = 28
       Height = 28
-      Caption = #128275
-      Flat = True
+      Caption = #62739
       TabOrder = 1
       OnClick = btnLockClick
     end
@@ -67,7 +64,6 @@ object NoteForm: TNoteForm
       Width = 28
       Height = 28
       Caption = #9633
-      Flat = True
       TabOrder = 2
       OnClick = btnCollapseClick
     end
@@ -76,8 +72,7 @@ object NoteForm: TNoteForm
       Top = 2
       Width = 28
       Height = 28
-      Caption = #128204
-      Flat = True
+      Caption = #62668
       TabOrder = 3
       OnClick = btnPinClick
     end
@@ -86,8 +81,7 @@ object NoteForm: TNoteForm
       Top = 2
       Width = 28
       Height = 28
-      Caption = #127918
-      Flat = True
+      Caption = #62382
       TabOrder = 4
       OnClick = btnColorClick
     end
@@ -107,7 +101,6 @@ object NoteForm: TNoteForm
     ParentFont = False
     ScrollBars = ssVertical
     TabOrder = 1
-    WordWrap = True
     OnChange = mmContentChange
     OnKeyDown = mmContentKeyDown
   end
@@ -130,42 +123,41 @@ object NoteForm: TNoteForm
       Caption = '&Color'
       object miYellow: TMenuItem
         Caption = '&Yellow'
-        Tag = 0
         OnClick = ColorMenuItemClick
       end
       object miGreen: TMenuItem
-        Caption = '&Green'
         Tag = 1
+        Caption = '&Green'
         OnClick = ColorMenuItemClick
       end
       object miBlue: TMenuItem
-        Caption = '&Blue'
         Tag = 2
+        Caption = '&Blue'
         OnClick = ColorMenuItemClick
       end
       object miPink: TMenuItem
-        Caption = '&Pink'
         Tag = 3
+        Caption = '&Pink'
         OnClick = ColorMenuItemClick
       end
       object miPurple: TMenuItem
-        Caption = 'P&urple'
         Tag = 4
+        Caption = 'P&urple'
         OnClick = ColorMenuItemClick
       end
       object miOrange: TMenuItem
-        Caption = '&Orange'
         Tag = 5
+        Caption = '&Orange'
         OnClick = ColorMenuItemClick
       end
       object miWhite: TMenuItem
-        Caption = '&White'
         Tag = 6
+        Caption = '&White'
         OnClick = ColorMenuItemClick
       end
       object miGray: TMenuItem
-        Caption = '&Gray'
         Tag = 7
+        Caption = '&Gray'
         OnClick = ColorMenuItemClick
       end
     end

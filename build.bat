@@ -29,10 +29,17 @@ cd /d "%~dp0src"
 REM Ensure the -N output dir exists (dcc32 does not auto-create it)
 if not exist "Win32\Debug" mkdir "Win32\Debug"
 
+REM VCL styles (Windows10, Windows10 Blue, Windows10 Dark) are embedded via
+REM the project .res (StickyNotes.res, IDE Project > Appearance). Do not
+REM link a second style .res: duplicate VCLSTYLE resources break
+REM TStyleManager auto-discovery at startup.
+
 REM -B full rebuild, -Q quiet, -M build dependent units,
-REM -I include paths, -U unit search path, -N .dcu output dir.
+REM -U unit search path (covers .pas files referenced via plain
+REM   `uses xxx;` in units that are themselves pulled in by the DPR),
+REM -N .dcu output dir.
 REM (redundant hard-coded D:\ketan\...\src\Utils path dropped for portability)
-dcc32 -B -Q -M -I.;Models;Controllers;Storage;Services;Utils;Forms -UWin32\Debug -NWin32\Debug StickyNotes.dpr 2>&1
+dcc32 -B -Q -M -U.;Models;Controllers;Storage;Services;Utils;Forms -NWin32\Debug StickyNotes.dpr 2>&1
 
 exit /b %ERRORLEVEL%
 
