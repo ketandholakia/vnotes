@@ -27,6 +27,7 @@ object NoteForm: TNoteForm
     Top = 0
     Width = 300
     Height = 32
+    StyleElements = [seBorder]
     Align = alTop
     BevelOuter = bvNone
     ParentBackground = False
@@ -91,6 +92,7 @@ object NoteForm: TNoteForm
     Top = 32
     Width = 300
     Height = 218
+    StyleElements = [seBorder]
     Align = alClient
     BorderStyle = bsNone
     Font.Charset = DEFAULT_CHARSET
