@@ -181,15 +181,19 @@ begin
 end;
 
 procedure TTrayForm.OnNewNote(Sender: TObject);
-var
-  Note: TNote;
 begin
-  Note := FApplication.NoteManager.CreateNote(
-    '', '', FApplication.Settings.DefaultColor);
-  Note.Width := FApplication.Settings.DefaultWidth;
-  Note.Height := FApplication.Settings.DefaultHeight;
-  Note.AlwaysOnTop := FApplication.Settings.DefaultAlwaysOnTop;
-  CreateNoteForm(Note);
+  // Settings-derived defaults are passed INTO CreateNote so the note is
+  // fully initialized before OnNoteCreated fires (synchronously inside
+  // CreateNote) - OnNoteCreated is the SINGLE window-creation path
+  // (TTrayForm.OnNoteCreated -> CreateNoteForm). Creating the form here as
+  // well produced the double-open bug. Left/Top 100/100 mirror the TNote
+  // constructor defaults; position defaults are not settings-driven.
+  FApplication.NoteManager.CreateNote(
+    '', '', FApplication.Settings.DefaultColor,
+    100, 100,
+    FApplication.Settings.DefaultWidth,
+    FApplication.Settings.DefaultHeight,
+    FApplication.Settings.DefaultAlwaysOnTop);
 end;
 
 procedure TTrayForm.OnOpenNotesList(Sender: TObject);
