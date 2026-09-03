@@ -112,7 +112,7 @@ begin
 
   // Setup tray
   tiMain.Icon := Application.Icon;
-  tiMain.Hint := 'Sticky Notes';
+  tiMain.Hint := 'V-Notes';
   tiMain.Visible := True;
 
   // Open existing notes

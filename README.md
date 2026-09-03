@@ -1,4 +1,4 @@
-# Sticky Notes
+# V-Notes
 
 A lightweight desktop sticky notes application for Windows, built with Delphi using a clean, modular architecture.
 

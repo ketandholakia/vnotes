@@ -38,9 +38,9 @@ procedure TAboutForm.FormCreate(Sender: TObject);
 begin
   BorderStyle := bsDialog;
   Position := poScreenCenter;
-  Caption := 'About Sticky Notes';
-  
-  lblTitle.Caption := 'Sticky Notes';
+  Caption := 'About V-Notes';
+
+  lblTitle.Caption := 'V-Notes';
   lblTitle.Font.Size := 18;
   lblTitle.Font.Style := [fsBold];
   
@@ -64,7 +64,7 @@ begin
   lblCopyright.Font.Size := 9;
   lblCopyright.Font.Color := clGrayText;
   
-  lblWebsite.Caption := 'github.com/ketan/sticky-notes';
+  lblWebsite.Caption := 'github.com/ketandholakia/vnotes';
   lblWebsite.Font.Size := 9;
   lblWebsite.Font.Color := clBlue;
   lblWebsite.Font.Style := [fsUnderline];
@@ -78,7 +78,7 @@ end;
 
 procedure TAboutForm.lblWebsiteClick(Sender: TObject);
 begin
-  ShellExecute(Handle, 'open', 'https://github.com/ketan/sticky-notes', nil, nil, SW_SHOWNORMAL);
+  ShellExecute(Handle, 'open', 'https://github.com/ketandholakia/vnotes', nil, nil, SW_SHOWNORMAL);
 end;
 
 procedure TAboutForm.lblWebsiteMouseEnter(Sender: TObject);

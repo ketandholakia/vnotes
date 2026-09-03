@@ -1,7 +1,7 @@
 object TrayForm: TTrayForm
   Left = 0
   Top = 0
-  Caption = 'Sticky Notes Tray'
+  Caption = 'V-Notes Tray'
   ClientHeight = 100
   ClientWidth = 200
   Color = clBtnFace
@@ -15,7 +15,7 @@ object TrayForm: TTrayForm
   OnDestroy = FormDestroy
   TextHeight = 15
   object tiMain: TTrayIcon
-    Hint = 'Sticky Notes'
+    Hint = 'V-Notes'
     PopupMenu = pmTray
     Visible = True
     OnDblClick = tiMainDblClick
