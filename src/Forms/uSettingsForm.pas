@@ -48,6 +48,9 @@ type
     lblBackupInterval: TLabel;
     edtBackupInterval: TEdit;
     udBackupInterval: TUpDown;
+    lblBackupRetention: TLabel;
+    edtBackupRetention: TEdit;
+    udBackupRetention: TUpDown;
     procedure FormCreate(Sender: TObject);
     procedure FormShow(Sender: TObject);
     procedure FormClose(Sender: TObject; var Action: TCloseAction);
@@ -95,6 +98,10 @@ begin
   udBackupInterval.Min := 1;
   udBackupInterval.Max := 30;
   udBackupInterval.Increment := 1;
+
+  udBackupRetention.Min := 0;
+  udBackupRetention.Max := 365;
+  udBackupRetention.Increment := 1;
 
   // Phase 4C: snapshot for the Cancel rollback path. Allocated once
   // per form instance and refreshed by LoadSettings. Released in
@@ -155,6 +162,7 @@ begin
   edtHotkeySearch.Text := FSettings.HotkeySearch;
   chkBackupEnabled.Checked := FSettings.BackupEnabled;
   edtBackupInterval.Text := FSettings.BackupIntervalDays.ToString;
+  edtBackupRetention.Text := FSettings.BackupRetentionDays.ToString;
 end;
 
 procedure TSettingsForm.SaveControls;
@@ -174,6 +182,7 @@ begin
   FSettings.HotkeySearch := edtHotkeySearch.Text;
   FSettings.BackupEnabled := chkBackupEnabled.Checked;
   FSettings.BackupIntervalDays := StrToIntDef(edtBackupInterval.Text, 1);
+  FSettings.BackupRetentionDays := StrToIntDef(edtBackupRetention.Text, 30);
 end;
 
 // Phase 4F: the former live theme preview (ApplyPreview -> TrySetStyle)

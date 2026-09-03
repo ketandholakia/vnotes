@@ -44,6 +44,8 @@ type
     procedure TestTickNowRespectsDisabledFlag;
     [Test]
     procedure TestTickNowInvokesBackupWhenEnabled;
+    [Test]
+    procedure TestBackupRetentionCleanup;
   end;
 
 implementation
@@ -166,6 +168,35 @@ begin
     'TickNow must trigger exactly one backup when enabled');
   Assert.IsTrue(FScheduler.LastBackupAt > 0,
     'LastBackupAt must be set after a successful tick');
+end;
+
+procedure TBackupSchedulerTestFixture.TestBackupRetentionCleanup;
+var
+  OldFile: string;
+  RecentFile: string;
+begin
+  // Create old backup (more than retention days old)
+  OldFile := TPath.Combine(FBackupPath, 'StickyNotes_Backup_20230101_120000.zip');
+  TFile.WriteAllText(OldFile, 'old backup content');
+  TFile.SetLastWriteTime(OldFile, Now - 10);
+
+  // Create recent backup (less than retention days old)
+  RecentFile := TPath.Combine(FBackupPath, 'StickyNotes_Backup_20240101_120000.zip');
+  TFile.WriteAllText(RecentFile, 'recent backup content');
+  TFile.SetLastWriteTime(RecentFile, Now - 1);
+
+  // Set retention to 7 days
+  FSettings.BackupRetentionDays := 7;
+
+  // Trigger backup which should also run cleanup
+  FBackupService.Backup;
+  Assert.AreEqual(1, FBackupCount, 'Should complete one backup');
+
+  // Verify old file was deleted
+  Assert.IsFalse(TFile.Exists(OldFile), 'Old backup should be deleted');
+
+  // Verify recent file was preserved
+  Assert.IsTrue(TFile.Exists(RecentFile), 'Recent backup should be preserved');
 end;
 
 initialization
