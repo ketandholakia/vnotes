@@ -14,6 +14,8 @@ type
   private
     FHandle: HWND;
     FRegistered: array[THotkeyID] of Boolean;
+    FFailedRegistrations: array[THotkeyID] of Boolean;
+    FHasShownNotification: Boolean;
     FHotkeys: array[THotkeyID] of record
       Modifiers: UINT;
       Key: UINT;
@@ -24,6 +26,7 @@ type
     FOnHotkey: array[THotkeyID] of THotkeyEvent;
     procedure WndProc(var Message: TMessage);
     function ParseHotkey(const AHotkeyStr: string; out AModifiers, AKey: UINT): Boolean;
+    function GetFailedRegistrations: string;
   public
     constructor Create(AHandle: HWND);
     destructor Destroy; override;
@@ -32,6 +35,8 @@ type
     procedure SetHotkey(AID: THotkeyID; const AHotkeyStr: string; AEvent: THotkeyEvent);
     procedure EnableHotkey(AID: THotkeyID; AEnable: Boolean);
     procedure HandleMessage(var Message: TMessage);  // Public method for message handling
+    property FailedRegistrations: string read GetFailedRegistrations;
+    procedure ShowHotkeyFailures;
   end;
 
 implementation
@@ -139,6 +144,8 @@ begin
   if not ParseHotkey(AHotkeyStr, Modifiers, Key) then 
   begin
     Logger.Warning(Format('Hotkey registration failed: Invalid hotkey string "%s"', [AHotkeyStr]));
+    FFailedRegistrations[AID] := True;
+    ShowHotkeyFailures;
     Exit;
   end;
   UnregisterHotkey(AID);
@@ -152,11 +159,14 @@ begin
     FHotkeys[AID].Enabled := True;
     FHotkeys[AID].Event := AEvent;
     FHotkeys[AID].HotkeyStr := AHotkeyStr;
+    FFailedRegistrations[AID] := False;
     Result := True;
   end
   else
   begin
     Logger.Warning(Format('Hotkey registration failed: %s (ID: %d)', [AHotkeyStr, Ord(AID)]));
+    FFailedRegistrations[AID] := True;
+    ShowHotkeyFailures;
   end;
 end;
 
@@ -214,6 +224,45 @@ end;
 procedure THotkeyService.HandleMessage(var Message: TMessage);
 begin
   WndProc(Message);
+end;
+
+function THotkeyService.GetFailedRegistrations: string;
+var
+  ID: THotkeyID;
+  FailedList: TStringList;
+begin
+  FailedList := TStringList.Create;
+  try
+    for ID := Low(THotkeyID) to High(THotkeyID) do
+    begin
+      if FFailedRegistrations[ID] then
+      begin
+        case ID of
+          hkNewNote: FailedList.Add('New Note');
+          hkSearch: FailedList.Add('Search');
+        end;
+      end;
+    end;
+    Result := FailedList.CommaText;
+  finally
+    FailedList.Free;
+  end;
+end;
+
+procedure THotkeyService.ShowHotkeyFailures;
+var
+  FailedList: string;
+begin
+  if FHasShownNotification then Exit;
+
+  FailedList := GetFailedRegistrations;
+  if FailedList <> '' then
+  begin
+    Application.MessageBox(PChar('The following hotkeys could not be registered: ' + FailedList +
+      '. These hotkeys may already be in use by other applications.'),
+      'Hotkey Warning', MB_OK or MB_ICONWARNING or MB_DEFBUTTON1);
+    FHasShownNotification := True;
+  end;
 end;
 
 end.
