@@ -232,6 +232,29 @@ object SettingsForm: TSettingsForm
           Associate = edtBackupInterval
           TabOrder = 2
         end
+        object lblBackupRetention: TLabel
+          Left = 16
+          Top = 96
+          Width = 120
+          Height = 15
+          Caption = 'Retention (days, 0=none):'
+        end
+        object edtBackupRetention: TEdit
+          Left = 152
+          Top = 93
+          Width = 60
+          Height = 23
+          TabOrder = 3
+          Text = '30'
+        end
+        object udBackupRetention: TUpDown
+          Left = 212
+          Top = 93
+          Width = 17
+          Height = 23
+          Associate = edtBackupRetention
+          TabOrder = 4
+        end
       end
     end
   end

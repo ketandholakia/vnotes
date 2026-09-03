@@ -19,6 +19,7 @@ type
     FEnableHotkeys: Boolean;
     FBackupEnabled: Boolean;
     FBackupIntervalDays: Integer;
+    FBackupRetentionDays: Integer;
     FDarkTheme: Boolean;
     FHotkeyNewNote: string;
     FHotkeySearch: string;
@@ -38,6 +39,7 @@ type
     property EnableHotkeys: Boolean read FEnableHotkeys write FEnableHotkeys;
     property BackupEnabled: Boolean read FBackupEnabled write FBackupEnabled;
     property BackupIntervalDays: Integer read FBackupIntervalDays write FBackupIntervalDays;
+    property BackupRetentionDays: Integer read FBackupRetentionDays write FBackupRetentionDays;
     property DarkTheme: Boolean read FDarkTheme write FDarkTheme;
     property HotkeyNewNote: string read FHotkeyNewNote write FHotkeyNewNote;
     property HotkeySearch: string read FHotkeySearch write FHotkeySearch;
@@ -65,6 +67,7 @@ begin
   FEnableHotkeys := True;
   FBackupEnabled := True;
   FBackupIntervalDays := 1;
+  FBackupRetentionDays := 30;
   FDarkTheme := False;
   FHotkeyNewNote := 'Ctrl+Alt+N';
   FHotkeySearch := 'Ctrl+Alt+F';
@@ -88,6 +91,7 @@ begin
     FEnableHotkeys := Ini.ReadBool('General', 'EnableHotkeys', FEnableHotkeys);
     FBackupEnabled := Ini.ReadBool('Backup', 'Enabled', FBackupEnabled);
     FBackupIntervalDays := Ini.ReadInteger('Backup', 'IntervalDays', FBackupIntervalDays);
+    FBackupRetentionDays := Ini.ReadInteger('Backup', 'RetentionDays', FBackupRetentionDays);
     FDarkTheme := Ini.ReadBool('Appearance', 'DarkTheme', FDarkTheme);
     FHotkeyNewNote := Ini.ReadString('Hotkeys', 'NewNote', FHotkeyNewNote);
     FHotkeySearch := Ini.ReadString('Hotkeys', 'Search', FHotkeySearch);
@@ -112,6 +116,7 @@ begin
     Ini.WriteBool('General', 'EnableHotkeys', FEnableHotkeys);
     Ini.WriteBool('Backup', 'Enabled', FBackupEnabled);
     Ini.WriteInteger('Backup', 'IntervalDays', FBackupIntervalDays);
+    Ini.WriteInteger('Backup', 'RetentionDays', FBackupRetentionDays);
     Ini.WriteBool('Appearance', 'DarkTheme', FDarkTheme);
     Ini.WriteString('Hotkeys', 'NewNote', FHotkeyNewNote);
     Ini.WriteString('Hotkeys', 'Search', FHotkeySearch);
@@ -133,6 +138,7 @@ begin
   FEnableHotkeys := Source.FEnableHotkeys;
   FBackupEnabled := Source.FBackupEnabled;
   FBackupIntervalDays := Source.FBackupIntervalDays;
+  FBackupRetentionDays := Source.FBackupRetentionDays;
   FDarkTheme := Source.FDarkTheme;
   FHotkeyNewNote := Source.FHotkeyNewNote;
   FHotkeySearch := Source.FHotkeySearch;

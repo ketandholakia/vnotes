@@ -25,6 +25,7 @@ type
     destructor Destroy; override;
     procedure Backup;
     procedure Restore(const ABackupFile: string);
+    procedure CleanupOldBackups;
     property OnProgress: TBackupProgress read FOnProgress write FOnProgress;
     property OnComplete: TBackupComplete read FOnComplete write FOnComplete;
   end;
@@ -89,12 +90,19 @@ begin
   ZipFile := GetBackupFileName;
   Success := CreateBackupZip(ZipFile);
   
-  if Assigned(FOnComplete) then
+  if Success then
   begin
-    if Success then
+    // Run retention cleanup after successful backup
+    CleanupOldBackups;
+
+    if Assigned(FOnComplete) then
       FOnComplete(True, 'Backup created: ' + TPath.GetFileName(ZipFile))
-    else
-      Logger.Error('Backup: Backup failed - see CreateBackupZip for details')
+  end
+  else
+  begin
+    if Assigned(FOnComplete) then
+      FOnComplete(False, 'Backup failed');
+    Logger.Error('Backup: Backup failed - see CreateBackupZip for details');
   end;
 end;
 
@@ -310,6 +318,65 @@ begin
         FOnComplete(False, 'Restore failed: ' + E.Message);
     end;
   end;
+end;
+
+procedure TBackupService.CleanupOldBackups;
+var
+  Logger: ILogger;
+  Files: TStringDynArray;
+  BackupFile: string;
+  FileDate: TDateTime;
+  RetentionDate: TDateTime;
+  DeletedCount: Integer;
+  I: Integer;
+  BackupPattern: string;
+begin
+  Logger := CreateLogger;
+
+  // Skip cleanup if retention is disabled (0)
+  if FSettings.BackupRetentionDays <= 0 then
+  begin
+    Logger.Debug('Backup cleanup: Retention disabled (BackupRetentionDays = 0)');
+    Exit;
+  end;
+
+  if not TDirectory.Exists(FBackupPath) then
+  begin
+    Logger.Debug('Backup cleanup: Backup directory does not exist');
+    Exit;
+  end;
+
+  RetentionDate := Now - FSettings.BackupRetentionDays;
+  DeletedCount := 0;
+
+  // Get all files matching the backup pattern
+  BackupPattern := 'StickyNotes_Backup_*.zip';
+  Files := TDirectory.GetFiles(FBackupPath, BackupPattern);
+
+  for I := 0 to High(Files) do
+  begin
+    BackupFile := Files[I];
+    try
+      // Use file modification time for determining eligibility
+      FileDate := TFile.GetLastWriteTime(BackupFile);
+
+      // Delete files older than retention date
+      if FileDate < RetentionDate then
+      begin
+        TFile.Delete(BackupFile);
+        Inc(DeletedCount);
+        Logger.Info(Format('Backup cleanup: Deleted old backup %s', [ExtractFileName(BackupFile)]));
+      end;
+    except
+      on E: Exception do
+      begin
+        Logger.Warning(Format('Backup cleanup: Failed to delete %s - %s',
+          [ExtractFileName(BackupFile), E.Message]));
+      end;
+    end;
+  end;
+
+  Logger.Info(Format('Backup cleanup: Completed. Deleted %d old backups.', [DeletedCount]));
 end;
 
 end.
