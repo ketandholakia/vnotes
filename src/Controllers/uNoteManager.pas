@@ -23,7 +23,15 @@ type
     destructor Destroy; override;
     procedure Initialize;
     procedure Finalize;
-    function CreateNote(const ATitle, AContent: string; AColor: TNoteColor = ncYellow): TNote;
+    // Optional geometry/on-top parameters exist so the note is FULLY
+    // initialized before OnNoteCreated fires (the event fires synchronously
+    // inside this method, and TTrayForm creates the note window there).
+    // Defaults mirror TNote.Create so existing 3-argument callers are
+    // unchanged. Callers pass user settings here; the manager stays
+    // settings-agnostic.
+    function CreateNote(const ATitle, AContent: string; AColor: TNoteColor = ncYellow;
+      ALeft: Integer = 100; ATop: Integer = 100; AWidth: Integer = 300;
+      AHeight: Integer = 250; AAlwaysOnTop: Boolean = False): TNote;
     function AddNote(ANote: TNote): Boolean;
     function DeleteNote(const ANoteID: Int64): Boolean;
     function FindByID(const ANoteID: Int64): TNote;
@@ -82,9 +90,15 @@ begin
     Result := nil;
 end;
 
-function TNoteManager.CreateNote(const ATitle, AContent: string; AColor: TNoteColor = ncYellow): TNote;
+function TNoteManager.CreateNote(const ATitle, AContent: string; AColor: TNoteColor;
+  ALeft, ATop, AWidth, AHeight: Integer; AAlwaysOnTop: Boolean): TNote;
 begin
   Result := TNote.Create(FStorage.GetNextID, ATitle, AContent, AColor);
+  Result.Left := ALeft;
+  Result.Top := ATop;
+  Result.Width := AWidth;
+  Result.Height := AHeight;
+  Result.AlwaysOnTop := AAlwaysOnTop;
   FNotes.Add(Result);
   SaveNote(Result);
   if Assigned(FOnNoteCreated) then

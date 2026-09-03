@@ -207,10 +207,14 @@ begin
   begin
     // Clamped position was changed; persist the new coordinates so the
     // note does not "drift back" to the inaccessible spot on the next
-    // launch.
+    // launch. (Phase 4E: the persist comment is now true - the corrected
+    // coordinates are written through the editor context immediately.
+    // Locked notes are included: position repair must work even when
+    // content editing is locked. Only fires when clamping occurred.)
     FNote.Left := Clamped.Left;
     FNote.Top := Clamped.Top;
     SetBounds(Clamped.Left, Clamped.Top, FNote.Width, FNote.Height);
+    FEditorContext.SaveNote(FNote);
   end;
   if FNote.AlwaysOnTop then
     FormStyle := fsStayOnTop;

@@ -12,6 +12,7 @@ uses
   TJsonStorageTests in 'Models\TJsonStorageTests.pas',
   TAutosaveServiceTests in 'Models\TAutosaveServiceTests.pas',
   TNoteApplicationTests in 'Models\TNoteApplicationTests.pas',
+  TNoteManagerTests in 'Models\TNoteManagerTests.pas',
   TNoteQueryTests in 'Models\TNoteQueryTests.pas',
   TSingleInstanceTests in 'Models\TSingleInstanceTests.pas',
   TBackupSchedulerTests in 'Models\TBackupSchedulerTests.pas',

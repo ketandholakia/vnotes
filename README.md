@@ -15,7 +15,7 @@ A lightweight desktop sticky notes application for Windows, built with Delphi us
 - **Auto-start** - Launch with Windows
 - **Backup & Restore** - ZIP-based backups with scheduled automatic backups (interval configurable in Settings)
 - **Single instance** - launching a second copy signals the running app (surfaces the Notes List) and exits
-- **Multi-monitor support** - Notes are restored clamped into a visible monitor work area (positions saved off-screen are moved back on launch; the corrected position is re-clamped on every start)
+- **Multi-monitor support** - Notes are restored clamped into a visible monitor work area; corrected coordinates are persisted immediately
 - **JSON storage** - One file per note, easy to sync with Git/Dropbox/OneDrive
 
 ## Architecture

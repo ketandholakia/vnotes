@@ -490,8 +490,8 @@ While integrating, a **suspected pre-existing double-open on new notes** was not
 
 ### Known Issues / Observations (accurate as of this phase)
 
-- **New-note double-open CONFIRMED, OUT OF SCOPE / deferred** — runtime test: one `Ctrl+Alt+N` created two note windows and two JSON files. Root cause as suspected in Phase 4B (`TTrayForm.OnNewNote` creates the note, then creates a form again while `OnNoteCreated` also creates one). Deferred to a later phase per scope guardrails.
-- **Clamped coordinates are not immediately persisted** — `TNoteForm.FormShow` corrects an off-screen restore in memory only; the JSON keeps the off-screen coordinates until some other save occurs, and the note is simply re-clamped on every launch. Follow-up candidate; deliberately not changed (persistence out of scope this phase).
+- **New-note double-open CONFIRMED, OUT OF SCOPE / deferred** — runtime test: one `Ctrl+Alt+N` created two note windows and two JSON files. Root cause as suspected in Phase 4B (`TTrayForm.OnNewNote` creates the note, then creates a form again while `OnNoteCreated` also creates one). Deferred to a later phase per scope guardrails. *(FIXED in Phase 4E.)*
+- **Clamped coordinates are not immediately persisted** — `TNoteForm.FormShow` corrects an off-screen restore in memory only; the JSON keeps the off-screen coordinates until some other save occurs, and the note is simply re-clamped on every launch. Follow-up candidate; deliberately not changed (persistence out of scope this phase). *(FIXED in Phase 4E.)*
 
 ### Out of Scope (untouched this phase)
 
@@ -534,6 +534,37 @@ While integrating, a **suspected pre-existing double-open on new notes** was not
 - Monitor-clamp position persistence
 - Backup retention / persisted last-backup time / hotkey-failure surfacing / title-in-note-UI (unimplemented action-plan wishlist items above)
 - SQLite; high-DPI (explicitly excluded from the 4A.5→4D arc)
+
+## Phase 4E — Note Lifecycle Correctness — COMPLETE + VALIDATED (2026-09-02)
+
+> **Status:** **COMPLETE + VALIDATED** — double-open fixed, clamp persistence implemented, the manager event contract locked in by tests (**80/80 PASS** = 67 baseline + 13 new), all builds green, manual GUI smoke PASS. No other roadmap items touched.
+
+### What Changed
+
+- [x] **New-note double-open fixed** — root cause verified: `TNoteManager.CreateNote` fires `OnNoteCreated` synchronously, `TTrayForm.OnNoteCreated` already calls `CreateNoteForm`, and `OnNewNote` then called `CreateNoteForm(Note)` a second time (2 windows per tray/hotkey/first-launch creation). Fix: `OnNewNote` no longer creates a form — `OnNoteCreated` is the single window-creation path.
+- [x] **Pre-event initialization invariant** — "a newly created TNote is fully initialized before `OnNoteCreated` fires." `TNoteManager.CreateNote` gained optional `ALeft/ATop/AWidth/AHeight/AAlwaysOnTop` parameters (defaults mirror `TNote.Create`, so all 3-argument callers — `TNoteEditorContext` duplicate/menu paths — are source- and behavior-compatible). `TNoteManager` stays settings-agnostic: `TTrayForm.OnNewNote` passes the Settings-derived values in. This also fixes a latent first-save divergence (the first JSON write previously stored hardcoded defaults while the in-memory note held Settings values).
+- [x] **Monitor-clamp persistence** — `TNoteForm.FormShow`'s clamp branch now calls `FEditorContext.SaveNote(FNote)` immediately after applying the corrected coordinates. Verified safe: no recursion (`OnNoteChanged` is empty), fires only when clamping actually occurred, direct save (no autosave interaction), and `Touch` stamping `UpdatedAt` is correct semantics. Locked notes are included (clamping is position repair, not content editing).
+- [x] **`TNoteManagerTests` added (13 tests, new)** — manager/event contract: `CreateNote` adds a note; `OnNoteCreated` fires exactly once per create; the event receives the same object `CreateNote` returned; N creates → N events with distinct IDs; the new pre-event initialization parameters; 3-argument calls keep historical defaults; `FindByID`/`FindByIndex`; `DeleteNote` fires `OnNoteDeleted` once (and not for unknown IDs); `AddNote` fires once and rejects duplicate IDs without a second event.
+
+### Creation-Path Audit (all single-window after the fix)
+
+Tray New Note · `Ctrl+Alt+N` · first-launch auto-note (all via `OnNewNote`) · note popup New Note (`miNewNoteClick`) · Duplicate (`miDuplicateClick`) · Notes List Open (`ShowNoteWindow`, create-or-raise) · Restore (`OpenAllNotes`, guarded by `FindNoteForm`).
+
+### Known Issues / Follow-ups (unchanged by this phase)
+
+- `miDuplicateClick` applies its +30 offset *after* creation, so the duplicate window appears at the default position while the offset persists on the later save. Same class as the double-open; now easily fixable via the new `CreateNote` parameters. Deferred.
+- Backup retention, persisted last-backup time, hotkey-failure surfacing, title-in-note-UI, `TBackupServiceTests` — remain unimplemented (see Phase 4D entry).
+- SQLite; high-DPI.
+
+### Validation Results (2026-09-02, plain shell — no RAD Studio prompt)
+
+| # | Check | Result |
+|---|-------|--------|
+| 1 | `build.bat` (Win32 Debug, dcc32 v36.0) | **PASS** — 0 errors |
+| 2 | `build_tests.bat` + run | **PASS** — 80/80 (67 baseline + 13 new), 0 Failed / 0 Errored / 0 Leaked |
+| 3 | `msbuild src\StickyNotes.dproj /t:Build /p:Config=Debug /p:Platform=Win32` | **PASS** — 0 errors |
+| 4 | `git diff --check` | **PASS** |
+| 5 | Manual smoke | **PASS** — `Ctrl+Alt+N` exactly one window + one JSON honoring Settings defaults (DefaultWidth=411 round-trip verified); tray New Note exactly one; Notes List search filter + open-from-list; off-screen note restart → clamped to (8,8) **and JSON persisted**; Settings Esc-cancel intact; tray menu intact; clean exit |
 
 ---
 
