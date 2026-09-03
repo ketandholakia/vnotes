@@ -50,6 +50,9 @@ type
     procedure OnSettings(Sender: TObject);
     procedure OnBackup(Sender: TObject);
     procedure OnRestore(Sender: TObject);
+    procedure BackupProgress(const AMessage: string; AProgress: Integer);
+    procedure BackupComplete(ASuccess: Boolean; const AMessage: string);
+    procedure RestoreComplete(ASuccess: Boolean; const AMessage: string);
     procedure OnAbout(Sender: TObject);
     procedure OnExit(Sender: TObject);
     procedure OnNoteCreated(const ANote: TNote);
@@ -95,6 +98,9 @@ begin
   FApplication.OnNoteChanged := OnNoteChanged;
   FApplication.OnNoteDeleted := OnNoteDeleted;
 
+  // Wire backup service callbacks for user feedback
+  FApplication.BackupService.OnProgress := BackupProgress;
+  FApplication.BackupService.OnComplete := BackupComplete;
   // Initialize (loads settings, storage, notes)
   FApplication.Initialize;
 
@@ -143,6 +149,9 @@ begin
       hkNewNote, FApplication.Settings.HotkeyNewNote, OnHotkeyNewNote);
     FApplication.HotkeyService.RegisterHotkey(
       hkSearch, FApplication.Settings.HotkeySearch, OnHotkeySearch);
+
+    // Show any hotkey registration failures after attempting to register
+    FApplication.HotkeyService.ShowHotkeyFailures;
   end;
 end;
 
@@ -210,29 +219,39 @@ begin
     SettingsForm.LoadSettings(FApplication.Settings);
     if SettingsForm.ShowModal = mrOk then
     begin
-      SettingsForm.SaveSettings(FApplication.Settings);
-      FApplication.ThemeService.SetDarkTheme(FApplication.Settings.DarkTheme);
-      FApplication.AutosaveService.Delay := FApplication.Settings.AutosaveDelay;
+      try
+        SettingsForm.SaveSettings(FApplication.Settings);
+        FApplication.ThemeService.SetDarkTheme(FApplication.Settings.DarkTheme);
+        FApplication.AutosaveService.Delay := FApplication.Settings.AutosaveDelay;
 
-      // Update hotkeys
-      if FApplication.Settings.EnableHotkeys then
-      begin
-        FApplication.HotkeyService.RegisterHotkey(
-          hkNewNote, FApplication.Settings.HotkeyNewNote, OnHotkeyNewNote);
-        FApplication.HotkeyService.RegisterHotkey(
-          hkSearch, FApplication.Settings.HotkeySearch, OnHotkeySearch);
-      end
-      else
-      begin
-        FApplication.HotkeyService.UnregisterHotkey(hkNewNote);
-        FApplication.HotkeyService.UnregisterHotkey(hkSearch);
+        // Update hotkeys
+        if FApplication.Settings.EnableHotkeys then
+        begin
+          FApplication.HotkeyService.RegisterHotkey(
+            hkNewNote, FApplication.Settings.HotkeyNewNote, OnHotkeyNewNote);
+          FApplication.HotkeyService.RegisterHotkey(
+            hkSearch, FApplication.Settings.HotkeySearch, OnHotkeySearch);
+        end
+        else
+        begin
+          FApplication.HotkeyService.UnregisterHotkey(hkNewNote);
+          FApplication.HotkeyService.UnregisterHotkey(hkSearch);
+        end;
+
+        // Phase 4C: re-arm the periodic backup schedule to honour any
+        // changes to BackupEnabled / BackupIntervalDays.
+        FApplication.RefreshBackupSchedule;
+
+        FApplication.SaveSettings;
+        tiMain.Hint := 'Settings saved successfully';
+      except
+        on E: Exception do
+        begin
+          Application.MessageBox(PChar('Failed to save settings: ' + E.Message),
+            'Settings Error', MB_OK or MB_ICONERROR or MB_DEFBUTTON1);
+          tiMain.Hint := 'Settings save failed';
+        end;
       end;
-
-      // Phase 4C: re-arm the periodic backup schedule to honour any
-      // changes to BackupEnabled / BackupIntervalDays.
-      FApplication.RefreshBackupSchedule;
-
-      FApplication.SaveSettings;
     end;
   finally
     SettingsForm.Free;
@@ -244,6 +263,29 @@ begin
   FApplication.BackupService.Backup;
 end;
 
+procedure TTrayForm.BackupProgress(const AMessage: string; AProgress: Integer);
+begin
+  // Optional: Could show progress in tray tooltip or status area if needed
+  // For now, we'll rely on the completion notification
+end;
+
+procedure TTrayForm.BackupComplete(ASuccess: Boolean; const AMessage: string);
+begin
+  if ASuccess then
+  begin
+    // Success notification - keep it subtle since this is expected behavior
+    if FApplication.Settings.BackupEnabled then
+      tiMain.Hint := 'Backup completed: ' + AMessage;
+  end
+  else
+  begin
+    // Failure notification - make this more visible to the user
+    Application.MessageBox(PChar('Backup failed: ' + AMessage),
+      'Backup Error', MB_OK or MB_ICONERROR or MB_DEFBUTTON1);
+    tiMain.Hint := 'Backup failed: ' + AMessage;
+  end;
+end;
+
 procedure TTrayForm.OnRestore(Sender: TObject);
 var
   OpenDialog: TOpenDialog;
@@ -253,9 +295,38 @@ begin
     OpenDialog.InitialDir := TPath.Combine(FApplication.AppDataPath, 'backups');
     OpenDialog.Filter := 'Backup files (*.zip)|*.zip';
     if OpenDialog.Execute then
-      FApplication.BackupService.Restore(OpenDialog.FileName);
+    begin
+      try
+        // Wire up restore callback for user feedback
+        FApplication.BackupService.OnComplete := RestoreComplete;
+        FApplication.BackupService.Restore(OpenDialog.FileName);
+      except
+        on E: Exception do
+        begin
+          Application.MessageBox(PChar('Failed to restore backup: ' + E.Message),
+            'Restore Error', MB_OK or MB_ICONERROR or MB_DEFBUTTON1);
+          tiMain.Hint := 'Restore failed';
+        end;
+      end;
+    end;
   finally
     OpenDialog.Free;
+  end;
+end;
+
+procedure TTrayForm.RestoreComplete(ASuccess: Boolean; const AMessage: string);
+begin
+  if ASuccess then
+  begin
+    Application.MessageBox(PChar('Restore completed: ' + AMessage),
+      'Restore Complete', MB_OK or MB_ICONINFORMATION or MB_DEFBUTTON1);
+    tiMain.Hint := 'Restore completed: ' + AMessage;
+  end
+  else
+  begin
+    Application.MessageBox(PChar('Restore failed: ' + AMessage),
+      'Restore Error', MB_OK or MB_ICONERROR or MB_DEFBUTTON1);
+    tiMain.Hint := 'Restore failed: ' + AMessage;
   end;
 end;
 
