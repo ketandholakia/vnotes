@@ -51,6 +51,16 @@ type
     procedure TestCleanupHandlesEmptyDirectory;
     [Test]
     procedure TestCleanupPreservesUnrelatedFiles;
+    [Test]
+    procedure TestRestoreClearsExistingNotes;
+    [Test]
+    procedure TestRestoreWithPreRestoreBackup;
+    [Test]
+    procedure TestRestoreRejectsIncompatibleVersion;
+    [Test]
+    procedure TestRestoreHandlesBackupWithoutNotes;
+    [Test]
+    procedure TestRestoreFailsGracefullyOnMissingFile;
   end;
 
 implementation
@@ -402,7 +412,237 @@ begin
   Assert.IsFalse(TFile.Exists(BackupFile), 'Old backup should be deleted');
 end;
 
-initialization
-  TDUnitX.RegisterTestFixture(TBackupServiceTestFixture);
+[Test]
+procedure TBackupServiceTestFixture.TestRestoreClearsExistingNotes;
+var
+  BackupFile: string;
+  ExistingNote: TNote;
+  RestoredNote: TNote;
+begin
+  // Create an existing note
+  ExistingNote := TNote.Create;
+  try
+    ExistingNote.Title := 'Existing Note';
+    ExistingNote.Content := 'This note should not exist after restore';
+    FNoteManager.AddNote(ExistingNote);
+
+    Assert.AreEqual(1, FNoteManager.NoteCount, 'Should have one existing note');
+
+    // Create and backup a different note
+    RestoredNote := TNote.Create;
+    try
+      RestoredNote.Title := 'Restored Note';
+      RestoredNote.Content := 'This is the restored note';
+      RestoredNote.Color := ncBlue;
+      FNoteManager.AddNote(RestoredNote);
+
+      Assert.AreEqual(2, FNoteManager.NoteCount, 'Should have two notes before backup');
+
+      // Backup
+      FBackupService.Backup;
+      Assert.AreEqual(1, FBackupCount, 'Should complete one backup');
+
+      // Clear notes to simulate starting fresh
+      while FNoteManager.NoteCount > 0 do
+      begin
+        RestoredNote := FNoteManager.Notes[0];
+        if RestoredNote <> nil then
+          FNoteManager.DeleteNote(RestoredNote.ID);
+      end;
+
+      Assert.AreEqual(0, FNoteManager.NoteCount, 'Should have no notes before restore');
+
+      // Restore
+      BackupFile := FBackupService.GetBackupFileName;
+      FBackupService.Restore(BackupFile);
+
+      // Verify only the restored notes are present
+      Assert.AreEqual(1, FNoteManager.NoteCount, 'Should have exactly one restored note');
+      RestoredNote := FNoteManager.Notes[0];
+      Assert.AreEqual('Restored Note', RestoredNote.Title, 'Should have the backup note title');
+    finally
+      // Don't free RestoredNote - it's owned by FNoteManager
+    end;
+  finally
+    ExistingNote.Free; // This was already in FNoteManager so it's deleted by clear
+  end;
+end;
+
+[Test]
+procedure TBackupServiceTestFixture.TestRestoreWithPreRestoreBackup;
+var
+  BackupFile: string;
+  Note: TNote;
+  PreRestoreFiles: TStringDynArray;
+  PreRestoreBackupExists: Boolean;
+begin
+  // Create a note to backup
+  Note := TNote.Create;
+  try
+    Note.Title := 'Original Note';
+    Note.Content := 'Content';
+    FNoteManager.AddNote(Note);
+
+    // Create backup (this is what will be restored)
+    FBackupService.Backup;
+    Assert.AreEqual(1, FBackupCount, 'Should complete one backup');
+
+    // Add another note
+    Note := TNote.Create;
+    Note.Title := 'Second Note';
+    Note.Content := 'Different content';
+    FNoteManager.AddNote(Note);
+
+    Assert.AreEqual(2, FNoteManager.NoteCount, 'Should have two notes before restore');
+
+    // Restore (which should create pre-restore backup)
+    BackupFile := FBackupService.GetBackupFileName;
+    FBackupService.Restore(BackupFile);
+
+    // Check that a pre-restore backup was created
+    PreRestoreFiles := TDirectory.GetFiles(FBackupPath, 'pre_restore_backup_*.zip');
+    PreRestoreBackupExists := Length(PreRestoreFiles) > 0;
+
+    Assert.IsTrue(PreRestoreBackupExists, 'Pre-restore backup should be created');
+    Assert.AreEqual(1, FNoteManager.NoteCount, 'Should have restored notes');
+  finally
+    Note.Free;
+  end;
+end;
+
+[Test]
+procedure TBackupServiceTestFixture.TestRestoreRejectsIncompatibleVersion;
+var
+  IncompatibleZip: string;
+  TempDir: string;
+  ManifestFile: string;
+  ManifestJson: System.JSON.TJSONObject;
+  ManifestText: string;
+  Zip: TZipFile;
+begin
+  // Create a backup with incompatible version
+  IncompatibleZip := TPath.Combine(FBackupPath, 'incompatible.zip');
+  TempDir := TPath.Combine(TPath.GetTempPath, 'IncompatibleTest_' + IntToStr(TThread.GetTickCount));
+
+  try
+    ForceDirectories(TempDir);
+
+    // Create manifest with future version
+    ManifestFile := TPath.Combine(TempDir, 'manifest.json');
+    ManifestJson := System.JSON.TJSONObject.Create;
+    try
+      ManifestJson.AddPair('version', System.JSON.TJSONNumber.Create(999));
+      ManifestJson.AddPair('createdAt', '2026-09-01T00:00:00');
+      ManifestText := ManifestJson.Format;
+      TFile.WriteAllText(ManifestFile, ManifestText, TEncoding.UTF8);
+    finally
+      ManifestJson.Free;
+    end;
+
+    // Create empty notes directory
+    ForceDirectories(TPath.Combine(TempDir, 'notes'));
+
+    // Create zip
+    Zip := TZipFile.Create;
+    try
+      Zip.Open(IncompatibleZip, zmWrite);
+      try
+        Zip.Add(ManifestFile, 'manifest.json');
+        Zip.Add(TPath.Combine(TempDir, 'notes'), 'notes/');
+      finally
+        Zip.Close;
+      end;
+    finally
+      Zip.Free;
+    end;
+
+    // Try to restore - should fail
+    FBackupService.Restore(IncompatibleZip);
+
+    // Verify restore was marked as failed (no notes added)
+    Assert.AreEqual(0, FNoteManager.NoteCount, 'Incompatible backup should not be restored');
+  finally
+    if TDirectory.Exists(TempDir) then
+      TDirectory.Delete(TempDir, True);
+  end;
+end;
+
+[Test]
+procedure TBackupServiceTestFixture.TestRestoreHandlesBackupWithoutNotes;
+var
+  BackupFile: string;
+  TempDir: string;
+  Zip: TZipFile;
+  ManifestFile: string;
+  ManifestJson: System.JSON.TJSONObject;
+  SettingsFile: string;
+begin
+  // Create a backup with settings but no notes directory
+  BackupFile := TPath.Combine(FBackupPath, 'no_notes.zip');
+  TempDir := TPath.Combine(TPath.GetTempPath, 'NoNotesTest_' + IntToStr(TThread.GetTickCount));
+
+  try
+    ForceDirectories(TempDir);
+
+    // Create manifest
+    ManifestFile := TPath.Combine(TempDir, 'manifest.json');
+    ManifestJson := System.JSON.TJSONObject.Create;
+    try
+      ManifestJson.AddPair('version', System.JSON.TJSONNumber.Create(1));
+      ManifestJson.AddPair('createdAt', FormatDateTime('yyyy-mm-dd"T"hh:nn:ss', Now));
+      TFile.WriteAllText(ManifestFile, ManifestJson.Format, TEncoding.UTF8);
+    finally
+      ManifestJson.Free;
+    end;
+
+    // Create settings file but no notes
+    SettingsFile := TPath.Combine(TempDir, 'settings.ini');
+    FSettings.SaveToFile(SettingsFile);
+
+    // Create zip (no notes directory)
+    Zip := TZipFile.Create;
+    try
+      Zip.Open(BackupFile, zmWrite);
+      try
+        Zip.Add(ManifestFile, 'manifest.json');
+        Zip.Add(SettingsFile, 'settings.ini');
+      finally
+        Zip.Close;
+      end;
+    finally
+      Zip.Free;
+    end;
+
+    // Create a note to restore on top of
+    FNoteManager.AddNote(TNote.Create('Test', 'Content', ncYellow));
+    Assert.AreEqual(1, FNoteManager.NoteCount, 'Should have note before restore');
+
+    // Restore (should work but have 0 notes in result)
+    FBackupService.Restore(BackupFile);
+    Assert.AreEqual(1, FRestoreCount, 'Restore should attempt to complete');
+    Assert.AreEqual(0, FNoteManager.NoteCount, 'Should have no notes after restoring backup with no notes');
+  finally
+    if TDirectory.Exists(TempDir) then
+      TDirectory.Delete(TempDir, True);
+  end;
+end;
+
+[Test]
+procedure TBackupServiceTestFixture.TestRestoreFailsGracefullyOnMissingFile;
+var
+  MissingFile: string;
+begin
+  // Try to restore from non-existent file
+  MissingFile := TPath.Combine(FBackupPath, 'definitely_does_not_exist.zip');
+
+  // Add a note to verify it's not lost on failed restore
+  FNoteManager.AddNote(TNote.Create('Existing', 'Note', ncYellow));
+
+  // Attempt restore
+  FBackupService.Restore(MissingFile);
+
+  // Verify restore failed gracefully and existing note is preserved
+  Assert.AreEqual(1, FNoteManager.NoteCount, 'Existing notes should not be lost on failed restore');
+end;
 
 end.
