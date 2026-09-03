@@ -4,7 +4,7 @@ interface
 
 uses
   System.SysUtils, System.Classes, System.Types, Winapi.Windows, Winapi.Messages,
-  Vcl.Forms;
+  Vcl.Forms, uILogger;
 
 type
   THotkeyID = (hkNewNote, hkSearch);
@@ -131,10 +131,16 @@ function THotkeyService.RegisterHotkey(AID: THotkeyID; const AHotkeyStr: string;
 var
   Modifiers, Key: UINT;
   HotkeyID: Integer;
+  Logger: ILogger;
 begin
   Result := False;
-  if not ParseHotkey(AHotkeyStr, Modifiers, Key) then Exit;
+  Logger := CreateLogger;
   
+  if not ParseHotkey(AHotkeyStr, Modifiers, Key) then 
+  begin
+    Logger.Warning(Format('Hotkey registration failed: Invalid hotkey string "%s"', [AHotkeyStr]));
+    Exit;
+  end;
   UnregisterHotkey(AID);
   
   HotkeyID := BASE_HOTKEY_ID + Ord(AID);
@@ -147,6 +153,10 @@ begin
     FHotkeys[AID].Event := AEvent;
     FHotkeys[AID].HotkeyStr := AHotkeyStr;
     Result := True;
+  end
+  else
+  begin
+    Logger.Warning(Format('Hotkey registration failed: %s (ID: %d)', [AHotkeyStr, Ord(AID)]));
   end;
 end;
 

@@ -5,7 +5,7 @@ interface
 uses
   System.SysUtils,
   Vcl.Graphics,
-  uNote, uEnums, uNoteManager, uAutosaveService, uThemeService, uSettings;
+  uNote, uEnums, uNoteManager, uAutosaveService, uThemeService, uSettings, uILogger;
 
 type
   /// <summary>
@@ -19,7 +19,9 @@ type
     // -- Note lifecycle -----------------------------------------------
     procedure SaveNote(const ANote: TNote);
     function DeleteNote(const ANoteID: Int64): Boolean;
-    function CreateNote(const ATitle, AContent: string; AColor: TNoteColor): TNote;
+    function CreateNote(const ATitle, AContent: string; AColor: TNoteColor): TNote; overload;
+    function CreateNote(const ATitle, AContent: string; AColor: TNoteColor;
+      ALeft, ATop, AWidth, AHeight: Integer; AAlwaysOnTop: Boolean): TNote; overload;
 
     // -- Autosave ----------------------------------------------------
     procedure ScheduleSave(const ANote: TNote);
@@ -52,7 +54,9 @@ type
     // INoteEditorContext
     procedure SaveNote(const ANote: TNote);
     function DeleteNote(const ANoteID: Int64): Boolean;
-    function CreateNote(const ATitle, AContent: string; AColor: TNoteColor): TNote;
+    function CreateNote(const ATitle, AContent: string; AColor: TNoteColor): TNote; overload;
+    function CreateNote(const ATitle, AContent: string; AColor: TNoteColor;
+      ALeft, ATop, AWidth, AHeight: Integer; AAlwaysOnTop: Boolean): TNote; overload;
     procedure ScheduleSave(const ANote: TNote);
     procedure CancelSave(const ANoteID: Int64);
     function GetNoteColor(ANoteColor: TNoteColor): TColor;
@@ -89,7 +93,13 @@ end;
 function TNoteEditorContext.CreateNote(const ATitle, AContent: string;
   AColor: TNoteColor): TNote;
 begin
-  Result := FNoteManager.CreateNote(ATitle, AContent, AColor);
+  Result := FNoteManager.CreateNote(ATitle, AContent, AColor, 100, 100, 300, 250, False);
+end;
+
+function TNoteEditorContext.CreateNote(const ATitle, AContent: string; AColor: TNoteColor;
+  ALeft, ATop, AWidth, AHeight: Integer; AAlwaysOnTop: Boolean): TNote;
+begin
+  Result := FNoteManager.CreateNote(ATitle, AContent, AColor, ALeft, ATop, AWidth, AHeight, AAlwaysOnTop);
 end;
 
 procedure TNoteEditorContext.ScheduleSave(const ANote: TNote);

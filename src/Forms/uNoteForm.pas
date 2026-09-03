@@ -452,15 +452,11 @@ begin
 end;
 
 procedure TNoteForm.miDuplicateClick(Sender: TObject);
-var
-  NewNote: TNote;
 begin
   if FNote.Locked then Exit;
   
-  NewNote := FEditorContext.CreateNote(FNote.Title + ' (copy)', FNote.Content, FNote.Color);
-  NewNote.Left := FNote.Left + 30;
-  NewNote.Top := FNote.Top + 30;
-  FEditorContext.SaveNote(NewNote);
+  FEditorContext.CreateNote(FNote.Title + ' (copy)', FNote.Content, FNote.Color,
+    FNote.Left + 30, FNote.Top + 30, FNote.Width, FNote.Height, FNote.AlwaysOnTop);
 end;
 
 procedure TNoteForm.miPropertiesClick(Sender: TObject);
