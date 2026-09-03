@@ -60,7 +60,6 @@ type
     FOriginalSettings: TSettings;
     procedure LoadControls;
     procedure SaveControls;
-    procedure ApplyPreview;
   public
     procedure LoadSettings(ASettings: TSettings);
     procedure SaveSettings(ASettings: TSettings);
@@ -73,7 +72,7 @@ var
 implementation
 
 uses
-  uEnums, uThemeService, Winapi.ShellAPI, Vcl.Themes, Vcl.Styles;
+  uEnums, uThemeService, Winapi.ShellAPI;
 
 {$R *.dfm}
 
@@ -177,14 +176,14 @@ begin
   FSettings.BackupIntervalDays := StrToIntDef(edtBackupInterval.Text, 1);
 end;
 
-procedure TSettingsForm.ApplyPreview;
-begin
-  // Apply theme preview
-  if chkDarkTheme.Checked then
-    TStyleManager.TrySetStyle('Windows10 Dark')
-  else
-    TStyleManager.TrySetStyle('Windows10');
-end;
+// Phase 4F: the former live theme preview (ApplyPreview -> TrySetStyle)
+// was removed. Applying a VCL style while this dialog is showing forces a
+// handle recreation of the showing modal form, which re-enters its show
+// sequence and raises EInvalidOperation "Cannot change Visible in OnShow
+// or OnHide". The selected theme is applied safely on OK instead, via
+// TTrayForm.OnSettings -> TThemeService.SetDarkTheme (after the modal is
+// hidden). btnApply still persists the other settings without touching
+// the live style.
 
 procedure TSettingsForm.btnOKClick(Sender: TObject);
 begin
@@ -202,12 +201,11 @@ end;
 procedure TSettingsForm.btnApplyClick(Sender: TObject);
 begin
   SaveControls;
-  ApplyPreview;
 end;
 
 procedure TSettingsForm.chkDarkThemeClick(Sender: TObject);
 begin
-  ApplyPreview;
+  // Selection is applied on OK (see comment above).
 end;
 
 end.
