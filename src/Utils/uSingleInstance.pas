@@ -3,7 +3,7 @@ unit uSingleInstance;
 {
   Phase 4C: lightweight single-instance guard.
 
-  Uses a Windows named mutex to ensure only one Sticky Notes process
+  Uses a Windows named mutex to ensure only one V-Notes process
   is running for the current user/session. A second launch detects the
   existing instance and signals it to surface (bring the tray form /
   notes to the foreground) via a registered window message.
@@ -25,7 +25,7 @@ uses
 const
   // Window title of the tray form (used by a second instance to locate the
   // running one with FindWindow). Kept in sync with uTrayForm's DFM caption.
-  SN_WINDOW_TITLE = 'Sticky Notes Tray';
+  SN_WINDOW_TITLE = 'V-Notes Tray';
   // Registered window message: ask the existing instance to surface itself.
   SN_APPEAR_MSG = 'StickyNotes.SingleInstance.Appear';
 

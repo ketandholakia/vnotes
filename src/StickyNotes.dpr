@@ -43,7 +43,7 @@ var
   SingleInstance: TSingleInstance;
 
 begin
-  // Phase 4C: ensure only one Sticky Notes instance runs for this user.
+  // Phase 4C: ensure only one V-Notes instance runs for this user.
   // Acquire is performed before Application.Initialize so a second
   // launch can short-circuit without ever instantiating the tray form.
   SingleInstance := TSingleInstance.Create;
@@ -68,7 +68,7 @@ begin
     Application.MainFormOnTaskbar := False;
     Application.ShowMainForm := False;
     TStyleManager.TrySetStyle('Windows10');
-    Application.Title := 'Sticky Notes';
+    Application.Title := 'V-Notes';
 
     // Enable runtime themes
     // Create the main tray form (hidden)

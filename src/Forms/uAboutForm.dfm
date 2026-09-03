@@ -2,8 +2,8 @@ object AboutForm: TAboutForm
   Left = 0
   Top = 0
   BorderStyle = bsDialog
-  Caption = 'About Sticky Notes'
-  ClientHeight = 350
+  Caption = 'About V-Notes'
+  ClientHeight = 380
   ClientWidth = 400
   Color = clBtnFace
   Font.Charset = DEFAULT_CHARSET
@@ -35,7 +35,7 @@ object AboutForm: TAboutForm
       Top = 24
       Width = 110
       Height = 25
-      Caption = 'Sticky Notes'
+      Caption = 'V-Notes'
       Font.Charset = DEFAULT_CHARSET
       Font.Color = clWindowText
       Font.Height = -19
@@ -61,7 +61,7 @@ object AboutForm: TAboutForm
     Left = 0
     Top = 100
     Width = 400
-    Height = 200
+    Height = 230
     Align = alClient
     BevelOuter = bvNone
     TabOrder = 1
@@ -76,7 +76,7 @@ object AboutForm: TAboutForm
     end
     object lblCopyright: TLabel
       Left = 20
-      Top = 149
+      Top = 178
       Width = 98
       Height = 13
       Caption = 'Copyright '#194#169' 2026'
@@ -89,10 +89,10 @@ object AboutForm: TAboutForm
     end
     object lblWebsite: TLabel
       Left = 20
-      Top = 169
+      Top = 200
       Width = 157
       Height = 19
-      Caption = 'github.com/ketan/sticky-notes'
+      Caption = 'github.com/ketandholakia/vnotes'
       Font.Charset = DEFAULT_CHARSET
       Font.Color = clBlue
       Font.Height = -11
@@ -106,7 +106,7 @@ object AboutForm: TAboutForm
   end
   object pnlButtons: TPanel
     Left = 0
-    Top = 300
+    Top = 330
     Width = 400
     Height = 50
     Align = alBottom
