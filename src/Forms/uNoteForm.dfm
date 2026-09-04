@@ -174,7 +174,6 @@ object NoteForm: TNoteForm
       Height = 22
       Align = alClient
       BevelOuter = bvNone
-      BorderSpacing.Around = 2
       TabOrder = 0
     end
     object edNewTag: TEdit
