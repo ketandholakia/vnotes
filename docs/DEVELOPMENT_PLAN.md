@@ -685,5 +685,48 @@ The above entry was drafted from a review of the in-tree diff without a local co
 
 ---
 
+## Phase 6B — Tag Filtering & Checklist Progress — COMPLETE + VALIDATED (2026-09-04)
+
+> **Status:** **COMPLETE + VALIDATED** — query/model foundation (6B.1) + Notes List UI integration (6B.2) + two one-line post-6B fixes; no schema change (stays v2), no persistence changes, no UI redesign; **116/116 tests PASS** (98 baseline + 18 new), 0 Failed / 0 Errors / 0 Leaked. Interactive GUI pass remains outstanding (validation environment is headless); all UI behavior verified statically plus the automated suite.
+
+### What Changed
+
+- [x] **6B.1 — query/model foundation** (`4882f03`)
+  - `INoteQuery` gains `DistinctTags(ANotes): TArray<string>` (case-insensitive uniqueness keeping first-seen casing, deterministic case-insensitive alphabetical order, trims + ignores blank tags, non-mutating) and `FilterByTag(ATag, ANotes): TObjectList<TNote>` (trimmed, case-insensitive **exact** match — not substring; empty/blank tag explicitly returns empty; same UpdatedAt DESC / ID DESC ordering; `OwnsObjects = False`). Interface GUID unchanged.
+  - `TNote` gains purely derived `ChecklistDoneCount` / `ChecklistTotalCount` (no stored state; empty checklist ⇒ 0/0).
+  - `TNoteQuery` internals: `Search`'s ordering lambda extracted into a shared `CompareForRecency` comparer reused by `FilterByTag`; `Search` semantics unchanged.
+  - 18 new tests (4 in `TNoteTests`, 14 in `TNoteQueryTests`): distinct-tags uniqueness/casing/whitespace/ordering/empty/nil/no-mutation; filter exact/case-insensitive/trimmed/non-substring/empty/ordering/tie-break/non-owning; progress empty/all-incomplete/all-complete/partial.
+- [x] **6B.2 — Notes List UI** (`e290ffe`, `src/Forms/uNotesListForm.pas` + `.dfm` only)
+  - New `cbTagFilter` combo (`csDropDownList`, index 0 = "All Tags") populated from `DistinctTags` on every `RefreshList` — the combo is a pure view, no second tag list. Selection survives refresh while the tag exists, falls back to "All Tags" when the last note using it is deleted; `OnChange` detached during rebuild (no re-entrancy).
+  - Composition via the query layer only: tag selected ⇒ `Search(query, FilterByTag(tag, Source))`; "All Tags" ⇒ plain `Search(query, Source)`. No UI-side filtering or sorting.
+  - ListView gains `Tags` + `Checklist` columns rendered independently (tags joined `', '`, progress as `done/total`); this also fixed a latent 6A issue where tags/checklist were appended as a 3rd subitem while only 2 columns existed, so the metadata was never visible.
+  - No new tests (no VCL UI harness in the test architecture); 116-test baseline preserved.
+- [x] **Post-6B fixes** — `5f6a0c6`: removed LCL-only `BorderSpacing.Around = 2` from `flwTags` in `uNoteForm.dfm` (VCL has no such property; DFM streaming raised on note-window creation). `8a8bb22`: tag footer in `uNoteForm.pas` no longer hides itself when the note has zero tags (previously the first tag was un-addable).
+- [x] **Untouched by design** — JSON schema (v2), `TJsonStorage`, backup/autosave/settings/themes/lifecycle, `TNoteManager` ownership, `Search` semantics. 6B.2 diff = the two Notes List files only.
+
+### Validation Results (2026-09-04, plain shell — no RAD Studio prompt)
+
+| # | Check | Result |
+|---|-------|--------|
+| 1 | `build.bat` (Win32 Debug, dcc32 v36.0) | **PASS** — 0 errors |
+| 2 | `build_tests.bat` + run | **PASS** — **116 Found / 116 Passed / 0 Failed / 0 Errors / 0 Skipped / 0 Leaked** (98 baseline + 18 new from 6B.1) |
+| 3 | `git diff --check` | **PASS** |
+| 4 | Architecture review (6B.3) | **PASS** — state owned by `TNote`, filtering by `TNoteQuery`, persistence by storage; no new global state; ownership + ordering contracts preserved |
+| 5 | Interactive GUI smoke | **Outstanding** — headless environment; app launch verified, UI paths verified statically + via automated suite |
+
+### Files Changed During Phase 6B
+
+| File | Change |
+|------|--------|
+| `src/Models/uNote.pas` | `ChecklistDoneCount` / `ChecklistTotalCount` derived helpers |
+| `src/Storage/uNoteQuery.pas` | `INoteQuery.DistinctTags` + `FilterByTag`; shared `CompareForRecency` / `NewResultList` |
+| `src/Forms/uNotesListForm.pas` + `.dfm` | `cbTagFilter` combo, `Tags` + `Checklist` columns, query-layer composition in `RefreshList` |
+| `src/Forms/uNoteForm.pas` + `.dfm` | One-line fixes only: footer always visible, `BorderSpacing` removed |
+| `tests/Models/TNoteTests.pas` | 4 new checklist-progress tests |
+| `tests/Models/TNoteQueryTests.pas` | 14 new distinct-tags / tag-filter tests |
+| `docs/DEVELOPMENT_PLAN.md` | This Phase 6B closure entry |
+
+---
+
 *Document created: 2026-08-31*
 *Last updated: 2026-09-04*
