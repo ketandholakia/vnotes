@@ -33,6 +33,12 @@ type
     procedure TestFutureSchemaVersionSkippedAndPreserved;
     [Test]
     procedure TestInvalidSchemaVersionSkippedAndPreserved;
+    [Test]
+    procedure TestSaveLoadNoteWithTagsAndChecklistRoundTrips;
+    [Test]
+    procedure TestLoadLegacyAndV1NotesDefaultToEmptyTagsAndChecklist;
+    [Test]
+    procedure TestLoadMalformedTagsAndChecklistDegradesGracefully;
   end;
 
 implementation
@@ -361,8 +367,8 @@ begin
         Pair := (Json as TJSONObject).Get('schemaVersion');
         Assert.IsNotNull(Pair, 'Saved JSON must contain schemaVersion');
         Assert.IsTrue(Pair.JsonValue is TJSONNumber, 'schemaVersion must be a JSON number');
-        Assert.AreEqual<Int64>(1, (Pair.JsonValue as TJSONNumber).AsInt64,
-          'schemaVersion must equal the current schema version (1)');
+        Assert.AreEqual<Int64>(2, (Pair.JsonValue as TJSONNumber).AsInt64,
+          'schemaVersion must equal the current schema version (2)');
       finally
         Json.Free;
       end;
@@ -561,6 +567,165 @@ begin
     Assert.AreEqual<string>(BadContent,
       TFile.ReadAllText(BadFile, TEncoding.UTF8),
       'Invalid-schema file must not be modified');
+  finally
+    Storage.Free;
+    if TDirectory.Exists(TempDir) then
+      TDirectory.Delete(TempDir, True);
+  end;
+end;
+
+procedure TJsonStorageTestFixture.TestSaveLoadNoteWithTagsAndChecklistRoundTrips;
+var
+  Storage: TJsonStorage;
+  Note, LoadedNote: TNote;
+  TempDir: string;
+  LoadedNotes: TObjectList<TNote>;
+begin
+  TempDir := TPath.GetTempPath + 'StickyNotes_TagsChecklistTest_';
+  if TDirectory.Exists(TempDir) then
+    TDirectory.Delete(TempDir, True);
+
+  Storage := TJsonStorage.Create(TempDir);
+  try
+    Note := TNote.Create(9, 'Shopping', 'Weekly run', ncGreen);
+    try
+      Note.AddTag('errands');
+      Note.AddTag('personal');
+      Note.AddChecklistItem('Milk');
+      Note.AddChecklistItem('Eggs', True);
+
+      Assert.IsTrue(Storage.SaveNote(Note), 'SaveNote should succeed');
+    finally
+      Note.Free;
+    end;
+
+    LoadedNotes := Storage.LoadAllNotes;
+    try
+      Assert.AreEqual<Integer>(1, LoadedNotes.Count);
+      LoadedNote := LoadedNotes[0];
+
+      Assert.AreEqual<Integer>(2, Length(LoadedNote.Tags));
+      Assert.IsTrue(LoadedNote.HasTag('errands'));
+      Assert.IsTrue(LoadedNote.HasTag('personal'));
+
+      Assert.AreEqual<Integer>(2, Length(LoadedNote.ChecklistItems));
+      Assert.AreEqual('Milk', LoadedNote.ChecklistItems[0].Text);
+      Assert.IsFalse(LoadedNote.ChecklistItems[0].Done);
+      Assert.AreEqual('Eggs', LoadedNote.ChecklistItems[1].Text);
+      Assert.IsTrue(LoadedNote.ChecklistItems[1].Done);
+    finally
+      LoadedNotes.Free;
+    end;
+  finally
+    Storage.Free;
+    if TDirectory.Exists(TempDir) then
+      TDirectory.Delete(TempDir, True);
+  end;
+end;
+
+procedure TJsonStorageTestFixture.TestLoadLegacyAndV1NotesDefaultToEmptyTagsAndChecklist;
+var
+  Storage: TJsonStorage;
+  NotesDir, LegacyFile, V1File, TempDir: string;
+  LoadedNotes: TObjectList<TNote>;
+  LegacyNote, V1Note: TNote;
+begin
+  TempDir := TPath.GetTempPath + 'StickyNotes_TagsChecklistDefaultTest_';
+  if TDirectory.Exists(TempDir) then
+    TDirectory.Delete(TempDir, True);
+
+  Storage := TJsonStorage.Create(TempDir);
+  try
+    NotesDir := TPath.Combine(TempDir, 'notes');
+    TDirectory.CreateDirectory(NotesDir);
+
+    // v0 (unversioned)  predates both schemaVersion and tags/checklistItems.
+    LegacyFile := TPath.Combine(NotesDir, '0000000010.json');
+    TFile.WriteAllText(LegacyFile,
+      '{"ID":10,"Title":"Legacy","Content":"No tags field at all","Color":0,' +
+      '"Left":100,"Top":100,"Width":300,"Height":250,"AlwaysOnTop":false,' +
+      '"Collapsed":false,"Locked":false,"CreatedAt":"2024-01-01T00:00:00",' +
+      '"UpdatedAt":"2024-01-01T00:00:00"}', TEncoding.UTF8);
+
+    // v1  has schemaVersion but predates tags/checklistItems.
+    V1File := TPath.Combine(NotesDir, '0000000011.json');
+    TFile.WriteAllText(V1File,
+      '{"schemaVersion":1,"ID":11,"Title":"V1","Content":"Still no tags field",' +
+      '"Color":0,"Left":100,"Top":100,"Width":300,"Height":250,"AlwaysOnTop":false,' +
+      '"Collapsed":false,"Locked":false,"CreatedAt":"2024-01-01T00:00:00",' +
+      '"UpdatedAt":"2024-01-01T00:00:00"}', TEncoding.UTF8);
+
+    LoadedNotes := Storage.LoadAllNotes;
+    try
+      Assert.AreEqual<Integer>(2, LoadedNotes.Count);
+
+      LegacyNote := nil;
+      V1Note := nil;
+      for var N in LoadedNotes do
+      begin
+        if N.ID = 10 then LegacyNote := N
+        else if N.ID = 11 then V1Note := N;
+      end;
+
+      Assert.IsNotNull(LegacyNote, 'v0 note should load');
+      Assert.AreEqual<Integer>(0, Length(LegacyNote.Tags));
+      Assert.AreEqual<Integer>(0, Length(LegacyNote.ChecklistItems));
+
+      Assert.IsNotNull(V1Note, 'v1 note should load');
+      Assert.AreEqual<Integer>(0, Length(V1Note.Tags));
+      Assert.AreEqual<Integer>(0, Length(V1Note.ChecklistItems));
+    finally
+      LoadedNotes.Free;
+    end;
+  finally
+    Storage.Free;
+    if TDirectory.Exists(TempDir) then
+      TDirectory.Delete(TempDir, True);
+  end;
+end;
+
+procedure TJsonStorageTestFixture.TestLoadMalformedTagsAndChecklistDegradesGracefully;
+var
+  Storage: TJsonStorage;
+  NotesDir, FileName, TempDir: string;
+  LoadedNotes: TObjectList<TNote>;
+begin
+  TempDir := TPath.GetTempPath + 'StickyNotes_TagsChecklistMalformedTest_';
+  if TDirectory.Exists(TempDir) then
+    TDirectory.Delete(TempDir, True);
+
+  Storage := TJsonStorage.Create(TempDir);
+  try
+    NotesDir := TPath.Combine(TempDir, 'notes');
+    TDirectory.CreateDirectory(NotesDir);
+    FileName := TPath.Combine(NotesDir, '0000000012.json');
+
+    // "tags" is a number instead of an array; "checklistItems" contains one
+    // well-formed item and one malformed one (missing "text", a bare string
+    // instead of an object). None of this should make the note unloadable.
+    TFile.WriteAllText(FileName,
+      '{"schemaVersion":2,"ID":12,"Title":"Malformed","Content":"Still loads",' +
+      '"Color":0,"Left":100,"Top":100,"Width":300,"Height":250,"AlwaysOnTop":false,' +
+      '"Collapsed":false,"Locked":false,"CreatedAt":"2024-01-01T00:00:00",' +
+      '"UpdatedAt":"2024-01-01T00:00:00","tags":123,' +
+      '"checklistItems":[{"done":true},"not-an-object",{"text":"Valid","done":false}]}',
+      TEncoding.UTF8);
+
+    LoadedNotes := Storage.LoadAllNotes;
+    try
+      Assert.AreEqual<Integer>(1, LoadedNotes.Count,
+        'Note must still load despite malformed tags/checklistItems');
+      Assert.AreEqual<Integer>(0, Length(LoadedNotes[0].Tags),
+        'Non-array "tags" degrades to empty rather than failing the load');
+      // The malformed string element is skipped; the two objects survive
+      // (one with a defaulted blank Text, one fully valid).
+      Assert.AreEqual<Integer>(2, Length(LoadedNotes[0].ChecklistItems));
+      Assert.AreEqual('', LoadedNotes[0].ChecklistItems[0].Text);
+      Assert.IsTrue(LoadedNotes[0].ChecklistItems[0].Done);
+      Assert.AreEqual('Valid', LoadedNotes[0].ChecklistItems[1].Text);
+    finally
+      LoadedNotes.Free;
+    end;
   finally
     Storage.Free;
     if TDirectory.Exists(TempDir) then

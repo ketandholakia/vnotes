@@ -568,5 +568,80 @@ Tray New Note · `Ctrl+Alt+N` · first-launch auto-note (all via `OnNewNote`) ·
 
 ---
 
+## Phase 6A — Model & Storage Layer (Tags & Checklist) — COMPLETE + VALIDATED (2026-09-04)
+
+> **Status:** **COMPLETE + VALIDATED** — schema bumped to v2 (`CURRENT_SCHEMA_VERSION = 2`) in `uJsonStorage.pas`; `TNote` gains `Tags: TArray<string>` + `ChecklistItems: TArray<TChecklistItem>` (+ matching mutators); all three build paths GREEN; **88/88 tests PASS** (81 baseline + 4 new in `TNoteTests` + 3 new in `TJsonStorageTests`), 0 Failed / 0 Errored / 0 Leaked. **No UI work yet** (tag chips / checklist panel / tag search in Notes List deferred to Phase 6A part 2). **No commit made** (awaiting review).
+>
+> **Doc-tracking resume point** — this plan doc had gone stale: the last recorded phase entry was **4E** (2026-09-02), but the actual git history runs through **5A** → **5B** → **5D** (4F, 4G, 4H also present, also unrecorded here). Phases 4F/4G/4H/5A/5B/5D will be back-filled in a separate doc-sync pass; this entry is the first since 4E and therefore also the point at which doc-tracking resumes.
+
+### What Changed
+
+- [x] **`TNote` gains tags + checklist items** (`src/Models/uNote.pas`)
+  - New `TChecklistItem` record (`Text: string; Done: Boolean;` + `Create` constructor) — deliberately flat (no `Done`-timestamp, no sub-items) to match the plain-JSON-per-note storage model and keep the future mobile/sync payload trivial to diff field-by-field.
+  - Private fields `FTags: TArray<string>` + `FChecklistItems: TArray<TChecklistItem>`, initialised to `nil` in `TNote.Create`.
+  - Public properties `Tags` + `ChecklistItems` routed through getter/setter pairs that **deep-copy** the dynamic arrays (`System.Copy(Value)`); without this, dynamic-array assignment shares the underlying buffer and mutating one note's items in place would silently mutate the source.
+  - Tag mutators: `AddTag(ATag): Boolean` (trimmed, deduplicated case-insensitively, returns whether the set actually changed so callers can skip an autosave/`Touch`), `RemoveTag(ATag): Boolean` (case-insensitive), `HasTag(ATag): Boolean`.
+  - Checklist mutators: `AddChecklistItem(AText; ADone = False): Integer` (returns the new index, order-preserving like a `TList`), `RemoveChecklistItem(AIndex)`, `ToggleChecklistItem(AIndex)`, `SetChecklistItemText(AIndex; AText)`. Out-of-range index on `Toggle`/`Remove`/`SetText` is a safe no-op, not an exception.
+  - `Assign` now does `System.Copy` of both arrays — critical for `Clone` deep-copy semantics; the new `TestAssignAndCloneDeepCopyTagsAndChecklist` test pins this contract.
+  - `IsEmpty` now also considers `Length(FChecklistItems) = 0` — a note carrying only tags and no checklist items is still considered empty (tags alone aren't useful content); a note with checklist items is non-empty even if Title/Content are blank. The new `TestIsEmptyConsidersChecklistItems` test pins this.
+- [x] **JSON schema bumped to v2** (`src/Storage/uJsonStorage.pas`)
+  - `CURRENT_SCHEMA_VERSION = 2`. Header comment now spells out v0 (unversioned legacy) / v1 (has `schemaVersion`, no tags/checklist) / v2 (current, adds tags + checklistItems). Absent on v0/v1 files → read as empty arrays; same "default rather than reject" policy as every other field.
+  - `NoteToJson` now writes `tags` (string array) + `checklistItems` (array of `{text, done}` objects) via dedicated `TagsToJson` / `ChecklistItemsToJson` helpers.
+  - New defensive readers `JsonToTags` / `JsonToChecklistItems`: an absent field, a wrong-typed field, or a malformed element is treated as "no data" for that field/element rather than raising. A damaged tags/checklist block must never make an otherwise-valid note unloadable. Non-string tag elements and non-object checklist elements are skipped; a checklist object with a missing `text` defaults the text to `''`.
+  - `JsonToNote`'s schema-version comment block expanded to document v1 → v2 explicitly. Existing future-version / invalid-version rejection logic (Phase 3B) reused unchanged.
+- [x] **Tests** — 4 in `tests/Models/TNoteTests.pas` + 3 in `tests/Models/TJsonStorageTests.pas`
+  - `TNoteTests.TestTagsAddRemoveDedup` — case-insensitive duplicate rejection, blank/whitespace-only rejection, trimming, case-insensitive lookup + removal, second removal returns `False`.
+  - `TNoteTests.TestChecklistItemsAddToggleRemove` — add returns index, toggle flip-flop, set-text, out-of-range no-op on toggle/SetText/Remove, in-range remove preserves order.
+  - `TNoteTests.TestAssignAndCloneDeepCopyTagsAndChecklist` — clone mutations do not bleed into the original (locks the `System.Copy` contract).
+  - `TNoteTests.TestIsEmptyConsidersChecklistItems` — tags alone keep `IsEmpty = True`; a checklist item flips it to `False`.
+  - `TJsonStorageTests.TestSaveLoadNoteWithTagsAndChecklistRoundTrips` — save a note with 2 tags + 2 checklist items (one `Done = True`); reload; assert exact match.
+  - `TJsonStorageTests.TestLoadLegacyAndV1NotesDefaultToEmptyTagsAndChecklist` — write a v0 (no `schemaVersion`) and a v1 (has `schemaVersion: 1`) file by hand, both lacking `tags`/`checklistItems`; load via `LoadAllNotes`; assert both notes default to empty arrays.
+  - `TJsonStorageTests.TestLoadMalformedTagsAndChecklistDegradesGracefully` — `tags: 123` (non-array), `checklistItems` containing one well-formed object + a bare string + an object missing `text`; note still loads; `tags` → empty; checklist → 2 items (malformed string skipped, blank-text object kept with `Done = True`).
+  - `TestSaveWritesSchemaVersion` updated: the assertion now expects `schemaVersion == 2` (was `1` under Phase 3B).
+- [x] **Storage logging correctness fix** (`src/Storage/uJsonStorage.pas`) — the success-path log line in `SaveNote` used `Format('SaveNote: Note ID % saved successfully', [ANote.ID])` with a bare `%` and no format specifier. In Delphi `Format()` this either emits a literal `%` or raises `EConvertError` depending on the version; either way the `[ANote.ID]` argument was never substituted into the message. Corrected to `'SaveNote: Note ID %d saved successfully'`. Log line is otherwise identical. Rolled into Phase 6A rather than queued for a separate hygiene pass because it was surfaced during the first end-to-end run while verifying the new save/load paths and is one trivial character; deferring it would have left a known-broken log line in the codebase between the two phases.
+- [x] **Untouched by design** — no `.dproj` changes, no `StickyNotes.dpr` changes, no new files. Only edits to existing units. UI layer (`uNoteForm`, `uNotesListForm`, `uNoteQuery`) deliberately untouched; tag chips / checklist panel / tag search in the Notes List are **Phase 6A part 2**, a separate task once part 1 is verified.
+
+### Design Notes
+
+- **Schema migration without an explicit migration framework** — Phase 3B built the "default rather than reject" field-readers policy; Phase 6A reuses it for the two new fields. v0/v1 files are still interpreted correctly without any v0→v1 or v1→v2 transformation. The next save by this build will silently write the new fields, completing the migration in-place. Files are NOT auto-rewritten on load (Phase 3B invariant preserved).
+- **Deep-copy semantics on `Assign`/`Clone`** — the rationale is in a code comment on `uNote.pas` lines around `FTags := System.Copy(...)` and is also pinned by `TestAssignAndCloneDeepCopyTagsAndChecklist`. Without `System.Copy`, the dynamic-array reference would be shared and `AddTag`/`ToggleChecklistItem` (which mutate in place) would silently mutate both source and clone.
+- **Out-of-range mutators are no-ops, not exceptions** — checklist UI code (part 2) will repeatedly race against the underlying model during teardown / refresh / async load; safe no-ops are the correct contract for the boundary, matching the existing "always-tolerant parsers" style from `uJsonStorage.pas`.
+- **`TNote` API surface kept narrow** — no `Tags.Count`, no indexer, no enumerator. Callers that need to iterate use `for Tag in Note.Tags` (dynamic arrays enumerate directly) and `Length(Note.Tags)` / `Length(Note.ChecklistItems)`. This matches the rest of `TNote`'s public surface and keeps the part-2 UI layer free to introduce its own view models.
+
+### Validation Results (2026-09-04, plain shell — no RAD Studio prompt)
+
+| # | Check | Result |
+|---|-------|--------|
+| 1 | `build.bat` (Win32 Debug, dcc32 v36.0 / Delphi 12 Athens) | **PASS** — 6042 lines, 0 errors (only pre-existing hints). dcc32 version banner confirmed: `Embarcadero Delphi for Win32 compiler version 36.0` |
+| 2 | `build_tests.bat` + run | **PASS** — 41492 lines, 0 errors; **Tests Found: 88, Passed: 88, Failed: 0, Errored: 0, Leaked: 0, Ignored: 0** (81 baseline + 4 new in `TNoteTests` + 3 new in `TJsonStorageTests`) |
+| 3 | `TestSaveWritesSchemaVersion` | **PASS** — assertion updated to expect `schemaVersion = 2` per Phase 6A's schema bump; passes cleanly on first run |
+| 4 | `msbuild src\StickyNotes.dproj /t:Build /p:Config=Debug /p:Platform=Win32` | **PASS** — 0 errors. (Required `BDS=C:\Program Files (x86)\Embarcadero\Studio\23.0` **and** `BDSCOMMONDIR=C:\Users\Public\Documents\Embarcadero\Studio\23.0` in the env — BDS resolves the Delphi targets DLLs; BDSCOMMONDIR resolves the `\Styles\*.vsf` includes referenced from `StickyNotes.vrc`. With either unset, MSBuild fails with `RC2135: file not found: \Styles\*.vsf` — same root cause as in earlier entries; not a 6A regression. Easiest path: `call "C:\Program Files (x86)\Embarcadero\Studio\23.0\bin\rsvars.bat"` first, which sets both.) |
+
+### Files Changed During Phase 6A
+
+| File | Change |
+|------|--------|
+| `src/Models/uNote.pas` | New `TChecklistItem` record; `FTags`/`FChecklistItems` fields; tag mutators (`AddTag`/`RemoveTag`/`HasTag`); checklist mutators (`AddChecklistItem`/`RemoveChecklistItem`/`ToggleChecklistItem`/`SetChecklistItemText`); `Tags`/`ChecklistItems` properties routed through deep-copy getter/setter pairs; `Assign` deep-copies the two new arrays; `IsEmpty` now also considers `Length(FChecklistItems) = 0` |
+| `src/Storage/uJsonStorage.pas` | `CURRENT_SCHEMA_VERSION = 2`; expanded schema-version comment block; `NoteToJson` writes `tags` + `checklistItems`; new `TagsToJson` / `ChecklistItemsToJson` writers; new defensive `JsonToTags` / `JsonToChecklistItems` readers (treat wrong-typed fields and malformed elements as "no data"); schema-version comment in `JsonToNote` documents v1 → v2 explicitly; storage success-log line fixed (`%` → `%d` in `SaveNote`'s `Format()` call — see "Storage logging correctness fix" above) |
+| `tests/Models/TNoteTests.pas` | 4 new tests: `TestTagsAddRemoveDedup`, `TestChecklistItemsAddToggleRemove`, `TestAssignAndCloneDeepCopyTagsAndChecklist`, `TestIsEmptyConsidersChecklistItems` |
+| `tests/Models/TJsonStorageTests.pas` | 3 new tests: `TestSaveLoadNoteWithTagsAndChecklistRoundTrips`, `TestLoadLegacyAndV1NotesDefaultToEmptyTagsAndChecklist`, `TestLoadMalformedTagsAndChecklistDegradesGracefully`; `TestSaveWritesSchemaVersion` assertion updated from `1` to `2` |
+| `docs/DEVELOPMENT_PLAN.md` | This Phase 6A entry (first since the stale 4E entry; **doc-tracking resume point**) |
+
+### Doc-Review Fixup (post-entry, same commit, 2026-09-04)
+
+The above entry was drafted from a review of the in-tree diff without a local compiler. After the first end-to-end run on Delphi 12 Athens (dcc32 v36.0) two additional, mechanical edits were required and are included here so the fixups aren't lost between phases:
+
+- **Whitespace normalization inside `JsonToNote`** (`src/Storage/uJsonStorage.pas`) — the patch as written preserved the **indent widths** of ten pre-existing "spacer" blank lines between field-read blocks (six-space and three-space variants like `      ` and `   `), which `git diff --check` flags. Since they are pure visual separators (no code, no content) and the project's whitespace policy already rejects lines with trailing whitespace, all ten were normalized to truly empty lines (just a line terminator, no leading spaces). `git diff --check` now exits 0. The pre-existing trailing-whitespace was masked at HEAD because the lines were context-only in the previous diff; the 6A patch pulled them into diff context by adding content after them in the same hunk, surfacing the latent issue. No semantic change to the file.
+- **Storage success-log format specifier** (`src/Storage/uJsonStorage.pas:421`) — the bare `%` in `Format('SaveNote: Note ID % saved successfully', [ANote.ID])` was a latent bug from before 6A: depending on the Delphi version `Format()` either emits the literal `%` and ignores the argument, or raises `EConvertError`. Either way the note ID never reached the log. Corrected to `'SaveNote: Note ID %d saved successfully'`. Log line is otherwise identical; behavior of `SaveNote` is unchanged because the log call lives inside the post-success `try` and was previously at worst silently truncating its message. Surfaced during the first end-to-end run on dcc32 v36.0 because `Format()` on Delphi 12 raises on the malformed spec. Rolled into Phase 6A (not deferred to a separate hygiene pass) so the log line is correct on the very next save path that the new `JsonToChecklistItems` defensive readers feed into.
+
+### Out of Scope (untouched, queued for Phase 6A part 2)
+
+- Tag chips in the note editor (`uNoteForm.pas`)
+- Checklist panel in the note editor (`uNoteForm.pas`)
+- Tag search in the Notes List (`uNotesListForm.pas` + `uNoteQuery.pas`)
+- Back-fill of doc entries for Phases 4F / 4G / 4H / 5A / 5B / 5D (separate doc-sync pass)
+
+---
+
 *Document created: 2026-08-31*
-*Last updated: 2026-09-02*
+*Last updated: 2026-09-04*

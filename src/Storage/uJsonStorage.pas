@@ -17,7 +17,11 @@ type
   private
     const
       // Schema version of the JSON written by this build.
-      CURRENT_SCHEMA_VERSION = 1;
+      // v0 = unversioned legacy files.
+      // v1 = adds the schemaVersion field itself; no tags/checklistItems.
+      // v2 = adds "tags" (string array) and "checklistItems" (array of
+      //      {text, done}). Absent on v0/v1 files -> read as empty arrays.
+      CURRENT_SCHEMA_VERSION = 2;
       // Unversioned (pre-versioning) files are interpreted as schema 0.
       LEGACY_SCHEMA_VERSION = 0;
       SCHEMA_VERSION_FIELD = 'schemaVersion';
@@ -30,6 +34,14 @@ type
     procedure EnsureDirectories;
     function NoteToJson(const ANote: TNote): TJSONObject;
     function JsonToNote(const AJson: TJSONObject): TNote;
+    function TagsToJson(const ATags: TArray<string>): TJSONArray;
+    function ChecklistItemsToJson(const AItems: TArray<TChecklistItem>): TJSONArray;
+    // Both readers are defensive by design: an absent field (v0/v1 files),
+    // a wrong-typed field, or a malformed element is treated as "no data"
+    // for that field/element rather than raising  a damaged tags/checklist
+    // block should never make an otherwise-valid note unloadable.
+    function JsonToTags(const AJson: TJSONObject): TArray<string>;
+    function JsonToChecklistItems(const AJson: TJSONObject): TArray<TChecklistItem>;
   public
     constructor Create(const ABasePath: string);
     destructor Destroy; override;
@@ -126,6 +138,101 @@ begin
   Result.AddPair('Locked', TJSONBool.Create(ANote.Locked));
   Result.AddPair('CreatedAt', TJSONString.Create(DateTimeToISO8601(ANote.CreatedAt)));
   Result.AddPair('UpdatedAt', TJSONString.Create(DateTimeToISO8601(ANote.UpdatedAt)));
+
+  Result.AddPair('tags', TagsToJson(ANote.Tags));
+  Result.AddPair('checklistItems', ChecklistItemsToJson(ANote.ChecklistItems));
+end;
+
+function TJsonStorage.TagsToJson(const ATags: TArray<string>): TJSONArray;
+var
+  Tag: string;
+begin
+  Result := TJSONArray.Create;
+  for Tag in ATags do
+    Result.Add(Tag);
+end;
+
+function TJsonStorage.ChecklistItemsToJson(const AItems: TArray<TChecklistItem>): TJSONArray;
+var
+  Item: TChecklistItem;
+  ItemJson: TJSONObject;
+begin
+  Result := TJSONArray.Create;
+  for Item in AItems do
+  begin
+    ItemJson := TJSONObject.Create;
+    ItemJson.AddPair('text', TJSONString.Create(Item.Text));
+    ItemJson.AddPair('done', TJSONBool.Create(Item.Done));
+    Result.AddElement(ItemJson);
+  end;
+end;
+
+function TJsonStorage.JsonToTags(const AJson: TJSONObject): TArray<string>;
+var
+  Val: TJSONValue;
+  Arr: TJSONArray;
+  Elem: TJSONValue;
+  List: TArray<string>;
+  Count: Integer;
+begin
+  Result := nil;
+  Val := AJson.GetValue('tags');
+  if (Val = nil) or not (Val is TJSONArray) then
+    Exit;
+  Arr := Val as TJSONArray;
+  SetLength(List, Arr.Count);
+  Count := 0;
+  for Elem in Arr do
+  begin
+    if Elem is TJSONString then
+    begin
+      List[Count] := Elem.Value;
+      Inc(Count);
+    end;
+    // Non-string elements are skipped rather than aborting the whole load.
+  end;
+  SetLength(List, Count);
+  Result := List;
+end;
+
+function TJsonStorage.JsonToChecklistItems(const AJson: TJSONObject): TArray<TChecklistItem>;
+var
+  Val, TextVal, DoneVal: TJSONValue;
+  Arr: TJSONArray;
+  Elem: TJSONValue;
+  ItemObj: TJSONObject;
+  List: TArray<TChecklistItem>;
+  Count: Integer;
+  ItemText: string;
+  ItemDone: Boolean;
+begin
+  Result := nil;
+  Val := AJson.GetValue('checklistItems');
+  if (Val = nil) or not (Val is TJSONArray) then
+    Exit;
+  Arr := Val as TJSONArray;
+  SetLength(List, Arr.Count);
+  Count := 0;
+  for Elem in Arr do
+  begin
+    if not (Elem is TJSONObject) then
+      Continue; // Malformed element skipped, rest of the checklist still loads.
+    ItemObj := Elem as TJSONObject;
+
+    TextVal := ItemObj.GetValue('text');
+    if (TextVal <> nil) and (TextVal is TJSONString) then
+      ItemText := TextVal.Value
+    else
+      ItemText := '';
+
+    DoneVal := ItemObj.GetValue('done');
+    ItemDone := (DoneVal <> nil) and (DoneVal is TJSONTrue);
+
+    List[Count] := TChecklistItem.Create(ItemText, ItemDone);
+    Inc(Count);
+  end;
+  SetLength(List, Count);
+  Result := List;
 end;
 
 function TJsonStorage.JsonToNote(const AJson: TJSONObject): TNote;
@@ -142,12 +249,13 @@ begin
     raise Exception.Create('JsonToNote: AJson is nil');
 
   // --- Schema version inspection -------------------------------------------
-  // Missing schemaVersion  -> legacy (unversioned) format, treated as v0 and
-  //                           read with the legacy field mapping below.
-  // schemaVersion = 1      -> current format.
-  // schemaVersion < 0      -> invalid, reject.
-  // schemaVersion > 1      -> future format, reject safely (never touched).
-  // wrong JSON type        -> invalid metadata, reject safely.
+  // Missing schemaVersion       -> legacy (unversioned) format, treated as v0
+  //                                and read with the legacy field mapping below.
+  // schemaVersion = 1           -> v1: no tags/checklistItems, both default empty.
+  // schemaVersion = 2 (current) -> adds tags/checklistItems.
+  // schemaVersion < 0           -> invalid, reject.
+  // schemaVersion > current     -> future format, reject safely (never touched).
+  // wrong JSON type             -> invalid metadata, reject safely.
   Logger := CreateLogger;
   SchemaVal := AJson.GetValue(SCHEMA_VERSION_FIELD);
   if SchemaVal = nil then
@@ -189,38 +297,38 @@ begin
       Note.Content := Copy(Val.ToString, 2, Length(Val.ToString) - 2)
     else
       Note.Content := '';
-      
+
     Val := AJson.GetValue('Color');
     if (Val <> nil) and (Val is TJSONNumber) then
       ColorInt := (Val as TJSONNumber).AsInt
     else
       ColorInt := Ord(ncYellow);
     Note.Color := TNoteColor(ColorInt);
-    
+
     Val := AJson.GetValue('Left');
     if (Val <> nil) and (Val is TJSONNumber) then
       Note.Left := (Val as TJSONNumber).AsInt
     else
       Note.Left := 100;
-      
+
     Val := AJson.GetValue('Top');
     if (Val <> nil) and (Val is TJSONNumber) then
       Note.Top := (Val as TJSONNumber).AsInt
     else
       Note.Top := 100;
-      
+
     Val := AJson.GetValue('Width');
     if (Val <> nil) and (Val is TJSONNumber) then
       Note.Width := (Val as TJSONNumber).AsInt
     else
       Note.Width := 300;
-      
+
     Val := AJson.GetValue('Height');
     if (Val <> nil) and (Val is TJSONNumber) then
       Note.Height := (Val as TJSONNumber).AsInt
     else
       Note.Height := 250;
-      
+
     Val := AJson.GetValue('AlwaysOnTop');
     if (Val <> nil) and (Val is TJSONTrue) then
       Note.AlwaysOnTop := True
@@ -228,7 +336,7 @@ begin
       Note.AlwaysOnTop := False
     else
       Note.AlwaysOnTop := False;
-      
+
     Val := AJson.GetValue('Collapsed');
     if (Val <> nil) and (Val is TJSONTrue) then
       Note.Collapsed := True
@@ -236,7 +344,7 @@ begin
       Note.Collapsed := False
     else
       Note.Collapsed := False;
-      
+
     Val := AJson.GetValue('Locked');
     if (Val <> nil) and (Val is TJSONTrue) then
       Note.Locked := True
@@ -244,7 +352,7 @@ begin
       Note.Locked := False
     else
       Note.Locked := False;
-      
+
     Val := AJson.GetValue('CreatedAt');
     CreatedStr := '';
     if (Val <> nil) then
@@ -253,7 +361,7 @@ begin
       Note.CreatedAt := System.DateUtils.ISO8601ToDate(CreatedStr)
     else
       Note.CreatedAt := Now;
-      
+
     Val := AJson.GetValue('UpdatedAt');
     UpdatedStr := '';
     if (Val <> nil) then
@@ -262,7 +370,12 @@ begin
       Note.UpdatedAt := System.DateUtils.ISO8601ToDate(UpdatedStr)
     else
       Note.UpdatedAt := Now;
-      
+
+    // Absent on v0/v1 files (and on any malformed v2 field) -> empty arrays,
+    // same "default rather than reject" policy as every field above.
+    Note.Tags := JsonToTags(AJson);
+    Note.ChecklistItems := JsonToChecklistItems(AJson);
+
     Result := Note;
   except
     Note.Free;
@@ -305,7 +418,7 @@ begin
         // and leaves the original untouched if the operation fails
         if not MoveFileEx(PChar(TmpFileName), PChar(FileName), MOVEFILE_REPLACE_EXISTING) then
           RaiseLastOSError;
-        Logger.Info(Format('SaveNote: Note ID % saved successfully', [ANote.ID]));
+        Logger.Info(Format('SaveNote: Note ID %d saved successfully', [ANote.ID]));
         Result := True;
       except
         on E: Exception do
