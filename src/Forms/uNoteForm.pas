@@ -575,8 +575,8 @@ begin
     CreateTagChip(Tag, I);
   end;
 
-  // Update the footer visibility based on whether we have tags
-  pnlTagsFooter.Visible := Length(FNote.Tags) > 0;
+  // The footer (tag chips + "+ tag" input) must stay visible even when the
+  // note has no tags yet - hiding it would make the first tag un-addable.
 end;
 
 procedure TNoteForm.CreateTagChip(const ATag: string; AIndex: Integer);
