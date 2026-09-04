@@ -636,7 +636,7 @@ The above entry was drafted from a review of the in-tree diff without a local co
 
 ## Phase 6A Part 2 — UI & Query Integration — COMPLETE + VALIDATED (2026-09-04)
 
-> **Status:** **COMPLETE + VALIDATED** — `uNoteQuery.pas` helper methods converted from standalone functions to proper `TNoteQuery` class methods; `uNoteForm.pas` compilation errors fixed (duplicate `RefreshTagsFooter` declaration, missing `ChecklistItemToggle`/`ChecklistItemTextChange` declarations, `RemoveTagChip` signature mismatch, `CreateTagChip` canvas-before-creation bug, `Controls.Clear` replaced with `Controls[0].Free` loop); 7 new tests added (4 in `TNoteTests`, 3 in `TNoteQueryTests`); **98/98 tests PASS** (88 baseline + 10 new). All builds green, `git diff --check` PASS.
+> **Status:** **COMPLETE + VALIDATED** — `uNoteQuery.pas` helper methods converted from standalone functions to proper `TNoteQuery` class methods; `uNoteForm.pas` compilation errors fixed (duplicate `RefreshTagsFooter` declaration, missing `ChecklistItemToggle`/`ChecklistItemTextChange` declarations, `RemoveTagChip` signature mismatch, `CreateTagChip` canvas-before-creation bug, `Controls.Clear` replaced with `Controls[0].Free` loop); 7 new tests added (4 in `TNoteTests`, 3 in `TNoteQueryTests`); **98/98 tests PASS** (91 baseline + 7 new). All builds green, `git diff --check` PASS.
 
 ### What Changed
 
@@ -647,7 +647,7 @@ The above entry was drafted from a review of the in-tree diff without a local co
   - Fixed `RemoveTagChip` signature from `TNotifyEvent` to `TMouseEvent` (matching `OnMouseDown` event type)
   - Fixed `CreateTagChip` canvas-before-creation bug: `lblTag.Canvas.TextWidth` was called before `lblTag` was created; now creates label first, sets `Visible := False`, measures, then sets `Visible := True`
   - Replaced `flwTags.Controls.Clear` and `pnlChecklistItems.Controls.Clear` with `while ControlCount > 0 do Controls[0].Free` (more compatible with Delphi versions)
-- [x] **`tests/Models/TNoteTests.pas`** — 8 new tests: `TestTagAddRemoveMultipleTags`, `TestChecklistStableOrder`, `TestChecklistEmptyIsVisible`, `TestTagsCaseInsensitiveDedup`
+- [x] **`tests/Models/TNoteTests.pas`** — 4 new tests: `TestTagAddRemoveMultipleTags`, `TestChecklistStableOrder`, `TestChecklistEmptyIsVisible`, `TestTagsCaseInsensitiveDedup`
 - [x] **`tests/Models/TNoteQueryTests.pas`** — 3 new tests: `TestTagSearchSubstring`, `TestChecklistSearchSubstring`, `TestSearchMatchesMultipleFields`
 - [x] **`tests/StickyNotes.Tests.dpr`** — Added `TNoteFormTests` unit reference (later removed; the `TNoteTests` and `TNoteQueryTests` already cover the non-visual logic adequately)
 - [x] **`build_tests.bat`** — Added `..\src\Forms` to `-U` search paths so `uNoteForm` can be found by the test project
@@ -665,7 +665,7 @@ The above entry was drafted from a review of the in-tree diff without a local co
 | # | Check | Result |
 |---|-------|--------|
 | 1 | `build.bat` (Win32 Debug, dcc32 v36.0) | **PASS** — 0 errors (only pre-existing hints) |
-| 2 | `build_tests.bat` + run | **PASS** — **98 Found / 98 Passed / 0 Failed / 0 Errored / 0 Leaked** (90 baseline + 8 new in `TNoteTests` + 3 new in `TNoteQueryTests`... actually 90 baseline + 8 new = 98) |
+| 2 | `build_tests.bat` + run | **PASS** — **98 Found / 98 Passed / 0 Failed / 0 Errored / 0 Leaked** (91 baseline + 4 new in `TNoteTests` + 3 new in `TNoteQueryTests` = 98) |
 | 3 | `git diff --check` | **PASS** — no trailing whitespace |
 
 ### Files Changed During Phase 6A Part 2
