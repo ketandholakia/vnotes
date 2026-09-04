@@ -18,6 +18,15 @@ type
     btnCollapse: TButton;
     btnLock: TButton;
     mmContent: TMemo;
+    pnlChecklist: TPanel;
+    pnlChecklistItems: TPanel;
+    pnlAddChecklist: TPanel;
+    edAddChecklist: TEdit;
+    btnAddChecklist: TButton;
+    pnlTagsFooter: TPanel;
+    flwTags: TFlowPanel;
+    edNewTag: TEdit;
+    btnAddTag: TButton;
     pmNote: TPopupMenu;
     miNewNote: TMenuItem;
     miDuplicate: TMenuItem;
@@ -50,6 +59,10 @@ type
     procedure btnLockClick(Sender: TObject);
     procedure mmContentChange(Sender: TObject);
     procedure mmContentKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
+    procedure btnAddTagClick(Sender: TObject);
+    procedure edNewTagKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
+    procedure btnAddChecklistClick(Sender: TObject);
+    procedure edAddChecklistKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
     procedure pmNotePopup(Sender: TObject);
     procedure ColorMenuItemClick(Sender: TObject);
     procedure miAlwaysOnTopClick(Sender: TObject);
@@ -79,6 +92,16 @@ type
     procedure ApplyTheme;
     procedure WMNCHitTest(var Message: TWMNCHitTest); message WM_NCHITTEST;
     procedure WMGetMinMaxInfo(var Message: TWMGetMinMaxInfo); message WM_GETMINMAXINFO;
+    // Phase 6A Part 2: tag chip strip + checklist panel.
+    procedure RefreshTagsFooter;
+    procedure RefreshChecklistPanel;
+    procedure UpdateContentMode;  // memo vs checklist panel visibility
+    procedure HandleAddTagInput;
+    procedure HandleAddChecklistInput;
+    procedure ChecklistItemToggle(Sender: TObject);
+    procedure ChecklistItemTextChange(Sender: TObject);
+    procedure CreateTagChip(const ATag: string; AIndex: Integer);
+    procedure RemoveTagChip(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
   public
     constructor CreateNote(AOwner: TComponent; ANote: TNote; const AContext: INoteEditorContext);
     // Lets an owning form (e.g. TTrayForm) close this note window without
@@ -86,6 +109,13 @@ type
     // torn down in bulk, without reaching into the private FIsClosing field.
     procedure CloseWithoutSaving;
     procedure Save;  // Public wrapper for SaveNote
+    // Phase 6A Part 2: testability getters so the non-visual checklist logic
+    // can be exercised without firing VCL events. Read-only views of the
+    // current rows; row count == Length(FNote.ChecklistItems) at refresh time.
+    function ChecklistRowCount: Integer;
+    function ChecklistRowText(AIndex: Integer): string;
+    function ChecklistRowDone(AIndex: Integer): Boolean;
+    function IsChecklistPanelVisible: Boolean;
     property Note: TNote read FNote;
     property OnClosed: TNotifyEvent read FOnClosed write FOnClosed;
   end;
@@ -121,35 +151,35 @@ procedure TNoteForm.FormCreate(Sender: TObject);
 begin
   TWindowUtils.EnableBorderlessWindow(Self);
   DoubleBuffered := True;
-  
+
   // Header panel setup
   pnlHeader.Height := TWindowUtils.GetCaptionHeight;
   pnlHeader.Align := alTop;
   pnlHeader.BevelOuter := bvNone;
   pnlHeader.ParentBackground := False;
-  
+
   // Buttons
   btnClose.Width := 28;
   btnClose.Height := 28;
   btnClose.Caption := '×';
   btnClose.Font.Size := 16;
-  
+
   btnColor.Width := 28;
   btnColor.Height := 28;
   btnColor.Caption := '🎨';
-  
+
   btnPin.Width := 28;
   btnPin.Height := 28;
   btnPin.Caption := '📌';
-  
+
   btnCollapse.Width := 28;
   btnCollapse.Height := 28;
   btnCollapse.Caption := '□';
-  
+
   btnLock.Width := 28;
   btnLock.Height := 28;
   btnLock.Caption := '🔓';
-  
+
   // Content memo
   mmContent.Align := alClient;
   mmContent.BorderStyle := bsNone;
@@ -157,7 +187,7 @@ begin
   mmContent.WordWrap := True;
   mmContent.Font.Name := 'Segoe UI';
   mmContent.Font.Size := 10;
-  
+
   // Popup menu
   miYellow.Tag := Ord(ncYellow);
   miGreen.Tag := Ord(ncGreen);
@@ -167,7 +197,7 @@ begin
   miOrange.Tag := Ord(ncOrange);
   miWhite.Tag := Ord(ncWhite);
   miGray.Tag := Ord(ncGray);
-  
+
   LoadNote;
   ApplyTheme;
 end;
@@ -258,12 +288,16 @@ begin
   Height := FNote.Height;
   ApplyColor;
   UpdateUI;
+
+  // Phase 6A Part 2: Load tags and checklist
+  RefreshTagsFooter;
+  RefreshChecklistPanel;
 end;
 
 procedure TNoteForm.SaveNote;
 begin
   if FNote.Locked then Exit;
-  
+
   FNote.Title := Caption;
   FNote.Content := mmContent.Text;
   FNote.Left := Left;
@@ -278,7 +312,7 @@ begin
     FNote.Width := Width;
     FNote.Height := FCollapsedHeight;
   end;
-  
+
   FEditorContext.SaveNote(FNote);
 end;
 
@@ -291,7 +325,7 @@ begin
   pnlHeader.Color := TColorUtils.DarkenColor(C, 20);
   mmContent.Color := C;
   mmContent.Font.Color := FEditorContext.GetNoteTextColor(FNote.Color);
-  
+
   btnClose.Font.Color := mmContent.Font.Color;
   btnColor.Font.Color := mmContent.Font.Color;
   btnPin.Font.Color := mmContent.Font.Color;
@@ -305,11 +339,11 @@ begin
   btnCollapse.Enabled := not FNote.Locked;
   btnLock.Enabled := True;
   btnColor.Enabled := not FNote.Locked;
-  
+
   miAlwaysOnTop.Checked := FNote.AlwaysOnTop;
   miLock.Checked := FNote.Locked;
   miCollapse.Checked := FNote.Collapsed;
-  
+
   // Update color menu checks
   miYellow.Checked := FNote.Color = ncYellow;
   miGreen.Checked := FNote.Color = ncGreen;
@@ -319,12 +353,12 @@ begin
   miOrange.Checked := FNote.Color = ncOrange;
   miWhite.Checked := FNote.Color = ncWhite;
   miGray.Checked := FNote.Color = ncGray;
-  
+
   if FNote.Locked then
     btnLock.Caption := '🔒'
   else
     btnLock.Caption := '🔓';
-    
+
   if FNote.Collapsed then
     btnCollapse.Caption := '▣'
   else
@@ -361,7 +395,7 @@ end;
 procedure TNoteForm.btnCollapseClick(Sender: TObject);
 begin
   if FNote.Locked then Exit;
-  
+
   FNote.Collapsed := not FNote.Collapsed;
   if FNote.Collapsed then
   begin
@@ -416,7 +450,7 @@ var
   Item: TMenuItem;
 begin
   if FNote.Locked then Exit;
-  
+
   Item := Sender as TMenuItem;
   FNote.Color := TNoteColor(Item.Tag);
   ApplyColor;
@@ -454,7 +488,7 @@ end;
 procedure TNoteForm.miDuplicateClick(Sender: TObject);
 begin
   if FNote.Locked then Exit;
-  
+
   FEditorContext.CreateNote(FNote.Title + ' (copy)', FNote.Content, FNote.Color,
     FNote.Left + 30, FNote.Top + 30, FNote.Width, FNote.Height, FNote.AlwaysOnTop);
 end;
@@ -523,6 +557,272 @@ begin
   inherited;
   Message.MinMaxInfo.ptMinTrackSize.X := MIN_WIDTH;
   Message.MinMaxInfo.ptMinTrackSize.Y := MIN_HEIGHT;
+end;
+
+// Phase 6A Part 2: Tag Management Implementation
+
+procedure TNoteForm.RefreshTagsFooter;
+var
+  I: Integer;
+  Tag: string;
+begin
+  while flwTags.ControlCount > 0 do
+    flwTags.Controls[0].Free;
+
+  for I := 0 to High(FNote.Tags) do
+  begin
+    Tag := FNote.Tags[I];
+    CreateTagChip(Tag, I);
+  end;
+
+  // Update the footer visibility based on whether we have tags
+  pnlTagsFooter.Visible := Length(FNote.Tags) > 0;
+end;
+
+procedure TNoteForm.CreateTagChip(const ATag: string; AIndex: Integer);
+var
+  pnlTag: TPanel;
+  lblTag: TLabel;
+  btnRemove: TButton;
+  TagWidth: Integer;
+begin
+  pnlTag := TPanel.Create(Self);
+  pnlTag.Parent := flwTags;
+  pnlTag.BevelOuter := bvNone;
+  pnlTag.Caption := '';
+  pnlTag.Tag := AIndex;
+  pnlTag.OnMouseDown := RemoveTagChip;
+  pnlTag.Cursor := crHandPoint;
+  pnlTag.Height := 22;
+
+  lblTag := TLabel.Create(Self);
+  lblTag.Parent := pnlTag;
+  lblTag.Caption := ATag;
+  lblTag.Align := alClient;
+  lblTag.Alignment := taCenter;
+  lblTag.Font.Color := mmContent.Font.Color;
+  lblTag.Font.Style := [fsBold];
+  lblTag.Visible := False;
+
+  TagWidth := lblTag.Canvas.TextWidth(ATag) + 24;
+  lblTag.Visible := True;
+  pnlTag.Width := TagWidth;
+
+  btnRemove := TButton.Create(Self);
+  btnRemove.Parent := pnlTag;
+  btnRemove.Caption := '×';
+  btnRemove.Width := 16;
+  btnRemove.Height := 16;
+  btnRemove.Align := alRight;
+  btnRemove.Font.Size := 10;
+  btnRemove.Font.Color := mmContent.Font.Color;
+  btnRemove.OnMouseDown := RemoveTagChip;
+  btnRemove.Tag := AIndex;
+  btnRemove.Cursor := crHandPoint;
+end;
+
+procedure TNoteForm.RemoveTagChip(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
+var
+  Index: Integer;
+begin
+  if FNote.Locked then Exit;
+
+  Index := TComponent(Sender).Tag;
+  if (Index >= 0) and (Index < Length(FNote.Tags)) then
+  begin
+    if FNote.RemoveTag(FNote.Tags[Index]) then
+    begin
+      RefreshTagsFooter;
+      FEditorContext.ScheduleSave(FNote);
+    end;
+  end;
+end;
+
+procedure TNoteForm.btnAddTagClick(Sender: TObject);
+begin
+  HandleAddTagInput;
+end;
+
+procedure TNoteForm.edNewTagKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
+begin
+  if Key = VK_RETURN then
+  begin
+    HandleAddTagInput;
+    Key := 0; // Prevent default beep
+  end
+  else if Key = VK_ESCAPE then
+  begin
+    edNewTag.Text := '';
+    Key := 0;
+  end;
+end;
+
+procedure TNoteForm.HandleAddTagInput;
+var
+  TagText: string;
+begin
+  if FNote.Locked then Exit;
+
+  TagText := Trim(edNewTag.Text);
+  if TagText <> '' then
+  begin
+    if FNote.AddTag(TagText) then
+    begin
+      RefreshTagsFooter;
+      FEditorContext.ScheduleSave(FNote);
+    end;
+    edNewTag.Text := '';
+  end;
+end;
+
+// Phase 6A Part 2: Checklist Implementation
+
+procedure TNoteForm.RefreshChecklistPanel;
+var
+  I: Integer;
+  Item: TChecklistItem;
+  pnlItem: TPanel;
+  chkDone: TCheckBox;
+  edtText: TEdit;
+begin
+  while pnlChecklistItems.ControlCount > 0 do
+    pnlChecklistItems.Controls[0].Free;
+
+  for I := 0 to High(FNote.ChecklistItems) do
+  begin
+    Item := FNote.ChecklistItems[I];
+
+    pnlItem := TPanel.Create(Self);
+    pnlItem.Parent := pnlChecklistItems;
+    pnlItem.BevelOuter := bvNone;
+    pnlItem.Caption := '';
+    pnlItem.Height := 24;
+    pnlItem.Tag := I; // Store the item index for modification
+
+    chkDone := TCheckBox.Create(Self);
+    chkDone.Parent := pnlItem;
+    chkDone.Checked := Item.Done;
+    chkDone.Align := alLeft;
+    chkDone.Width := 20;
+    chkDone.OnClick := ChecklistItemToggle;
+    chkDone.Tag := I;
+
+    edtText := TEdit.Create(Self);
+    edtText.Parent := pnlItem;
+    edtText.Text := Item.Text;
+    edtText.Align := alClient;
+    edtText.BorderStyle := bsNone;
+    edtText.Font.Color := mmContent.Font.Color;
+    edtText.OnChange := ChecklistItemTextChange;
+    edtText.Tag := I;
+  end;
+
+  // Update checklist visibility
+  pnlChecklist.Visible := Length(FNote.ChecklistItems) > 0;
+  UpdateContentMode;
+end;
+
+procedure TNoteForm.btnAddChecklistClick(Sender: TObject);
+begin
+  HandleAddChecklistInput;
+end;
+
+procedure TNoteForm.edAddChecklistKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
+begin
+  if Key = VK_RETURN then
+  begin
+    HandleAddChecklistInput;
+    Key := 0; // Prevent default beep
+  end
+  else if Key = VK_ESCAPE then
+  begin
+    edAddChecklist.Text := '';
+    Key := 0;
+  end;
+end;
+
+procedure TNoteForm.HandleAddChecklistInput;
+var
+  ItemText: string;
+begin
+  if FNote.Locked then Exit;
+
+  ItemText := Trim(edAddChecklist.Text);
+  if ItemText <> '' then
+  begin
+    FNote.AddChecklistItem(ItemText);
+    RefreshChecklistPanel;
+    FEditorContext.ScheduleSave(FNote);
+    edAddChecklist.Text := '';
+  end;
+end;
+
+procedure TNoteForm.ChecklistItemToggle(Sender: TObject);
+var
+  Index: Integer;
+begin
+  if FNote.Locked then Exit;
+
+  Index := TComponent(Sender).Tag;
+  FNote.ToggleChecklistItem(Index);
+  RefreshChecklistPanel;
+  FEditorContext.ScheduleSave(FNote);
+end;
+
+procedure TNoteForm.ChecklistItemTextChange(Sender: TObject);
+var
+  Index: Integer;
+  Text: string;
+begin
+  if FNote.Locked then Exit;
+
+  Index := TComponent(Sender).Tag;
+  Text := TEdit(Sender).Text;
+  FNote.SetChecklistItemText(Index, Text);
+  FEditorContext.ScheduleSave(FNote);
+end;
+
+procedure TNoteForm.UpdateContentMode;
+begin
+  // If checklist is visible and has items, hide memo and show checklist
+  if pnlChecklist.Visible and (Length(FNote.ChecklistItems) > 0) then
+  begin
+    mmContent.Visible := False;
+    pnlChecklist.Visible := True;
+  end
+  else
+  begin
+    mmContent.Visible := True;
+    pnlChecklist.Visible := False;
+  end;
+end;
+
+// Phase 6A Part 2: Testability Getters
+
+function TNoteForm.ChecklistRowCount: Integer;
+begin
+  Result := Length(FNote.ChecklistItems);
+end;
+
+function TNoteForm.ChecklistRowText(AIndex: Integer): string;
+begin
+  if (AIndex >= 0) and (AIndex < Length(FNote.ChecklistItems)) then
+    Result := FNote.ChecklistItems[AIndex].Text
+  else
+    Result := '';
+end;
+
+function TNoteForm.ChecklistRowDone(AIndex: Integer): Boolean;
+begin
+  if (AIndex >= 0) and (AIndex < Length(FNote.ChecklistItems)) then
+    Result := FNote.ChecklistItems[AIndex].Done
+  else
+    Result := False;
+end;
+
+function TNoteForm.IsChecklistPanelVisible: Boolean;
+begin
+  Result := pnlChecklist.Visible;
 end;
 
 end.

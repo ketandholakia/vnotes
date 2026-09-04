@@ -37,6 +37,10 @@ type
   public
     function Search(const AQuery: string;
       const ANotes: TObjectList<TNote>): TObjectList<TNote>;
+  private
+    // Phase 6A Part 2: Helper functions for searching tags and checklist items
+    function ContainsTextArray(const ATags: TArray<string>; const AText: string): Boolean;
+    function ContainsTextInChecklist(const AItems: TArray<TChecklistItem>; const AText: string): Boolean;
   end;
 
 implementation
@@ -57,7 +61,9 @@ begin
   begin
     if (Query = '') or
        ContainsText(Note.Title, Query) or
-       ContainsText(Note.Content, Query) then
+       ContainsText(Note.Content, Query) or
+       ContainsTextArray(Note.Tags, Query) or
+       ContainsTextInChecklist(Note.ChecklistItems, Query) then
       Result.Add(Note);
   end;
 
@@ -76,6 +82,26 @@ begin
       else
         Result := 0;
     end));
+end;
+
+function TNoteQuery.ContainsTextArray(const ATags: TArray<string>; const AText: string): Boolean;
+var
+  Tag: string;
+begin
+  for Tag in ATags do
+    if ContainsText(Tag, AText) then
+      Exit(True);
+  Result := False;
+end;
+
+function TNoteQuery.ContainsTextInChecklist(const AItems: TArray<TChecklistItem>; const AText: string): Boolean;
+var
+  Item: TChecklistItem;
+begin
+  for Item in AItems do
+    if ContainsText(Item.Text, AText) then
+      Exit(True);
+  Result := False;
 end;
 
 end.

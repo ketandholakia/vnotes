@@ -43,6 +43,7 @@ dcc32 -B -Q -M ^
   -U"..\src\Services" ^
   -U"..\src\Application" ^
   -U"..\src\Utils" ^
+  -U"..\src\Forms" ^
   StickyNotes.Tests.dpr
 
 SET BUILD_RESULT=%ERRORLEVEL%

@@ -24,6 +24,14 @@ type
     procedure TestAssignAndCloneDeepCopyTagsAndChecklist;
     [Test]
     procedure TestIsEmptyConsidersChecklistItems;
+    [Test]
+    procedure TestTagAddRemoveMultipleTags;
+    [Test]
+    procedure TestChecklistStableOrder;
+    [Test]
+    procedure TestChecklistEmptyIsVisible;
+    [Test]
+    procedure TestTagsCaseInsensitiveDedup;
   end;
 
 implementation
@@ -244,6 +252,90 @@ begin
 
     Note.AddChecklistItem('Task 1');
     Assert.IsFalse(Note.IsEmpty); // a checklist item makes it non-empty
+  finally
+    Note.Free;
+  end;
+end;
+
+// Phase 6A Part 2: Additional focused regression tests
+
+procedure TNoteTestFixture.TestTagAddRemoveMultipleTags;
+var
+  Note: TNote;
+  I: Integer;
+begin
+  Note := TNote.Create;
+  try
+    for I := 1 to 5 do
+      Assert.IsTrue(Note.AddTag(Format('tag%d', [I])), Format('Should add tag%d', [I]));
+    Assert.AreEqual(5, Length(Note.Tags), 'Should have 5 tags');
+
+    Assert.IsFalse(Note.AddTag('tag3'), 'Duplicate should not add');
+    Assert.AreEqual(5, Length(Note.Tags), 'Should still have 5 tags');
+
+    Assert.IsTrue(Note.RemoveTag('tag3'), 'Should remove tag3');
+    Assert.AreEqual(4, Length(Note.Tags), 'Should have 4 tags');
+    Assert.IsFalse(Note.HasTag('tag3'), 'tag3 should be gone');
+  finally
+    Note.Free;
+  end;
+end;
+
+procedure TNoteTestFixture.TestChecklistStableOrder;
+var
+  Note: TNote;
+  I: Integer;
+begin
+  Note := TNote.Create;
+  try
+    for I := 1 to 5 do
+      Note.AddChecklistItem(Format('Item %d', [I]));
+
+    Assert.AreEqual(5, Length(Note.ChecklistItems), 'Should have 5 items');
+    Assert.AreEqual('Item 1', Note.ChecklistItems[0].Text);
+    Assert.AreEqual('Item 5', Note.ChecklistItems[4].Text);
+
+    Note.RemoveChecklistItem(2);
+    Assert.AreEqual(4, Length(Note.ChecklistItems), 'Should have 4 items after removal');
+    Assert.AreEqual('Item 1', Note.ChecklistItems[0].Text);
+    Assert.AreEqual('Item 2', Note.ChecklistItems[1].Text); // shifted
+    Assert.AreEqual('Item 4', Note.ChecklistItems[2].Text);
+    Assert.AreEqual('Item 5', Note.ChecklistItems[3].Text);
+  finally
+    Note.Free;
+  end;
+end;
+
+procedure TNoteTestFixture.TestChecklistEmptyIsVisible;
+var
+  Note: TNote;
+begin
+  Note := TNote.Create;
+  try
+    Assert.AreEqual(0, Length(Note.ChecklistItems), 'Empty checklist has 0 items');
+    Assert.IsTrue(Note.IsEmpty, 'Note with only title is empty');
+    Note.AddChecklistItem('Task');
+    Assert.IsFalse(Note.IsEmpty, 'Note with checklist item is not empty');
+    Assert.AreEqual(1, Length(Note.ChecklistItems), 'Should have 1 item');
+  finally
+    Note.Free;
+  end;
+end;
+
+procedure TNoteTestFixture.TestTagsCaseInsensitiveDedup;
+var
+  Note: TNote;
+begin
+  Note := TNote.Create;
+  try
+    Assert.IsTrue(Note.AddTag('WORK'));
+    Assert.IsFalse(Note.AddTag('work'), 'Lowercase duplicate rejected');
+    Assert.IsFalse(Note.AddTag('Work'), 'Mixed-case duplicate rejected');
+    Assert.IsFalse(Note.AddTag('  WORK  '), 'Trimmed duplicate rejected');
+    Assert.AreEqual(1, Length(Note.Tags), 'Should have exactly 1 tag');
+    Assert.AreEqual('WORK', Note.Tags[0], 'Tag should be trimmed');
+    Assert.IsTrue(Note.HasTag('work'), 'Case-insensitive lookup works');
+    Assert.IsTrue(Note.HasTag('Work'), 'Case-insensitive lookup works');
   finally
     Note.Free;
   end;

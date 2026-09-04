@@ -91,7 +91,7 @@ object NoteForm: TNoteForm
     Left = 0
     Top = 32
     Width = 300
-    Height = 218
+    Height = 194
     StyleElements = [seBorder]
     Align = alClient
     BorderStyle = bsNone
@@ -105,6 +105,98 @@ object NoteForm: TNoteForm
     TabOrder = 1
     OnChange = mmContentChange
     OnKeyDown = mmContentKeyDown
+  end
+  object pnlChecklist: TPanel
+    Left = 0
+    Top = 32
+    Width = 300
+    Height = 194
+    Align = alClient
+    BevelOuter = bvNone
+    BorderWidth = 4
+    ParentBackground = False
+    TabOrder = 2
+    Visible = False
+    object pnlChecklistItems: TPanel
+      Left = 4
+      Top = 4
+      Width = 292
+      Height = 166
+      Align = alClient
+      BevelOuter = bvNone
+      ParentBackground = False
+      TabOrder = 0
+    end
+    object pnlAddChecklist: TPanel
+      Left = 4
+      Top = 170
+      Width = 292
+      Height = 24
+      Align = alBottom
+      BevelOuter = bvNone
+      ParentBackground = False
+      TabOrder = 1
+      object edAddChecklist: TEdit
+        Left = 1
+        Top = 1
+        Width = 263
+        Height = 22
+        Align = alClient
+        TabOrder = 0
+        TextHint = '+ checklist item'
+        OnKeyDown = edAddChecklistKeyDown
+      end
+      object btnAddChecklist: TButton
+        Left = 264
+        Top = 1
+        Width = 28
+        Height = 22
+        Align = alRight
+        Caption = '+'
+        TabOrder = 1
+        OnClick = btnAddChecklistClick
+      end
+    end
+  end
+  object pnlTagsFooter: TPanel
+    Left = 0
+    Top = 226
+    Width = 300
+    Height = 24
+    Align = alBottom
+    BevelOuter = bvNone
+    ParentBackground = False
+    TabOrder = 3
+    object flwTags: TFlowPanel
+      Left = 1
+      Top = 1
+      Width = 218
+      Height = 22
+      Align = alClient
+      BevelOuter = bvNone
+      BorderSpacing.Around = 2
+      TabOrder = 0
+    end
+    object edNewTag: TEdit
+      Left = 219
+      Top = 1
+      Width = 55
+      Height = 22
+      Align = alRight
+      TabOrder = 1
+      TextHint = '+ tag'
+      OnKeyDown = edNewTagKeyDown
+    end
+    object btnAddTag: TButton
+      Left = 274
+      Top = 1
+      Width = 25
+      Height = 22
+      Align = alRight
+      Caption = '+'
+      TabOrder = 2
+      OnClick = btnAddTagClick
+    end
   end
   object pmNote: TPopupMenu
     OnPopup = pmNotePopup

@@ -48,6 +48,18 @@ type
     procedure TestOrderingMostRecentlyModifiedFirst;
     [Test]
     procedure TestOrderingTieBreakByIDDesc;
+    [Test]
+    procedure TestTagSearch;
+    [Test]
+    procedure TestChecklistSearch;
+    [Test]
+    procedure TestCombinedSearch;
+    [Test]
+    procedure TestTagSearchSubstring;
+    [Test]
+    procedure TestChecklistSearchSubstring;
+    [Test]
+    procedure TestSearchMatchesMultipleFields;
   end;
 
 implementation
@@ -308,6 +320,260 @@ begin
     Assert.AreEqual(2, Results.Count);
     Assert.AreEqual<Int64>(5, Results[0].ID);  // higher ID first on tie
     Assert.AreEqual<Int64>(4, Results[1].ID);
+  finally
+    Results.Free;
+  end;
+end;
+
+procedure TNoteQueryTestFixture.TestTagSearch;
+var
+  Results: TObjectList<TNote>;
+begin
+  // Create notes with tags
+  FSource.Add(TNote.Create(100, 'Work Note', 'Important project', ncYellow));
+  FSource.Add(TNote.Create(101, 'Personal Note', 'Shopping list', ncGreen));
+  FSource.Add(TNote.Create(102, 'Meeting Notes', 'Discussion topics', ncBlue));
+
+  // Add tags to notes
+  FSource[0].AddTag('work');
+  FSource[0].AddTag('project');
+  FSource[1].AddTag('personal');
+  FSource[1].AddTag('shopping');
+  FSource[2].AddTag('meeting');
+  FSource[2].AddTag('work');  // Shared tag with first note
+
+  // Test searching by tag
+  Results := FQuery.Search('work', FSource);
+  try
+    Assert.AreEqual(2, Results.Count);  // Both notes with 'work' tag
+    Assert.IsTrue((Results[0].ID = 100) or (Results[0].ID = 102));
+    Assert.IsTrue((Results[1].ID = 100) or (Results[1].ID = 102));
+    Assert.AreNotEqual(Results[0].ID, Results[1].ID);  // Should be different notes
+  finally
+    Results.Free;
+  end;
+
+  // Test case-insensitive tag search
+  Results := FQuery.Search('PROJECT', FSource);
+  try
+    Assert.AreEqual(1, Results.Count);
+    Assert.AreEqual<Int64>(100, Results[0].ID);
+  finally
+    Results.Free;
+  end;
+
+  // Test tag that doesn't exist
+  Results := FQuery.Search('nonexistent', FSource);
+  try
+    Assert.AreEqual(0, Results.Count);
+  finally
+    Results.Free;
+  end;
+end;
+
+procedure TNoteQueryTestFixture.TestChecklistSearch;
+var
+  Results: TObjectList<TNote>;
+begin
+  // Create notes with checklist items
+  FSource.Add(TNote.Create(200, 'Tasks', '', ncYellow));
+  FSource.Add(TNote.Create(201, 'Shopping', '', ncGreen));
+  FSource.Add(TNote.Create(202, 'Project', '', ncBlue));
+
+  // Add checklist items
+  FSource[0].AddChecklistItem('Review code');
+  FSource[0].AddChecklistItem('Write tests');
+  FSource[1].AddChecklistItem('Buy groceries');
+  FSource[1].AddChecklistItem('Call mom');
+  FSource[2].AddChecklistItem('Deploy to production');
+  FSource[2].AddChecklistItem('Review code');  // Shared item with first note
+
+  // Test searching in checklist items
+  Results := FQuery.Search('code', FSource);
+  try
+    Assert.AreEqual(2, Results.Count);  // Both notes with 'code' in checklist
+    Assert.IsTrue((Results[0].ID = 200) or (Results[0].ID = 202));
+    Assert.IsTrue((Results[1].ID = 200) or (Results[1].ID = 202));
+    Assert.AreNotEqual(Results[0].ID, Results[1].ID);  // Should be different notes
+  finally
+    Results.Free;
+  end;
+
+  // Test searching for specific checklist item
+  Results := FQuery.Search('groceries', FSource);
+  try
+    Assert.AreEqual(1, Results.Count);
+    Assert.AreEqual<Int64>(201, Results[0].ID);
+  finally
+    Results.Free;
+  end;
+
+  // Test search that doesn't match any checklist items
+  Results := FQuery.Search('nonexistent', FSource);
+  try
+    Assert.AreEqual(0, Results.Count);
+  finally
+    Results.Free;
+  end;
+end;
+
+procedure TNoteQueryTestFixture.TestCombinedSearch;
+var
+  Results: TObjectList<TNote>;
+begin
+  // Create notes with tags and checklist items
+  FSource.Add(TNote.Create(300, 'Work Project', '', ncYellow));
+  FSource.Add(TNote.Create(301, 'Personal Tasks', '', ncGreen));
+  FSource.Add(TNote.Create(302, 'Meeting Notes', '', ncBlue));
+
+  // Add tags and checklist items
+  FSource[0].AddTag('work');
+  FSource[0].AddTag('project');
+  FSource[0].AddChecklistItem('Review pull requests');
+  FSource[0].AddChecklistItem('Update documentation');
+
+  FSource[1].AddTag('personal');
+  FSource[1].AddTag('tasks');
+  FSource[1].AddChecklistItem('Buy groceries');
+  FSource[1].AddChecklistItem('Call dentist');
+
+  FSource[2].AddTag('meeting');
+  FSource[2].AddTag('notes');
+  FSource[2].AddChecklistItem('Follow up on action items');
+  FSource[2].AddChecklistItem('Schedule next meeting');
+
+  // Test search that matches title
+  Results := FQuery.Search('Work', FSource);
+  try
+    Assert.AreEqual(1, Results.Count);
+    Assert.AreEqual<Int64>(300, Results[0].ID);
+  finally
+    Results.Free;
+  end;
+
+  // Test search that matches tag
+  Results := FQuery.Search('meeting', FSource);
+  try
+    Assert.AreEqual(1, Results.Count);
+    Assert.AreEqual<Int64>(302, Results[0].ID);
+  finally
+    Results.Free;
+  end;
+
+  // Test search that matches checklist item
+  Results := FQuery.Search('groceries', FSource);
+  try
+    Assert.AreEqual(1, Results.Count);
+    Assert.AreEqual<Int64>(301, Results[0].ID);
+  finally
+    Results.Free;
+  end;
+
+  // Test search that matches multiple fields (should return all matching notes)
+  Results := FQuery.Search('project', FSource);
+  try
+    Assert.AreEqual(1, Results.Count);  // Only first note has 'project' tag
+    Assert.AreEqual<Int64>(300, Results[0].ID);
+  finally
+    Results.Free;
+  end;
+
+  // Test empty query returns all notes
+  Results := FQuery.Search('', FSource);
+  try
+    Assert.AreEqual(3, Results.Count);
+  finally
+    Results.Free;
+  end;
+end;
+
+// Phase 6A Part 2: Additional query integration edge cases
+
+procedure TNoteQueryTestFixture.TestTagSearchSubstring;
+var
+  Results: TObjectList<TNote>;
+begin
+  FSource.Add(TNote.Create(400, 'Work Items', '', ncYellow));
+  FSource[0].AddTag('project-management');
+  FSource[0].AddTag('urgent');
+
+  Results := FQuery.Search('project', FSource);
+  try
+    Assert.AreEqual(1, Results.Count);
+    Assert.AreEqual<Int64>(400, Results[0].ID);
+  finally
+    Results.Free;
+  end;
+
+  Results := FQuery.Search('urgent', FSource);
+  try
+    Assert.AreEqual(1, Results.Count);
+    Assert.AreEqual<Int64>(400, Results[0].ID);
+  finally
+    Results.Free;
+  end;
+end;
+
+procedure TNoteQueryTestFixture.TestChecklistSearchSubstring;
+var
+  Results: TObjectList<TNote>;
+begin
+  FSource.Add(TNote.Create(500, 'My Tasks', '', ncGreen));
+  FSource[0].AddChecklistItem('Review pull requests before merge');
+  FSource[0].AddChecklistItem('Update documentation');
+
+  Results := FQuery.Search('documentation', FSource);
+  try
+    Assert.AreEqual(1, Results.Count);
+    Assert.AreEqual<Int64>(500, Results[0].ID);
+  finally
+    Results.Free;
+  end;
+
+  Results := FQuery.Search('pull', FSource);
+  try
+    Assert.AreEqual(1, Results.Count);
+    Assert.AreEqual<Int64>(500, Results[0].ID);
+  finally
+    Results.Free;
+  end;
+end;
+
+procedure TNoteQueryTestFixture.TestSearchMatchesMultipleFields;
+var
+  Results: TObjectList<TNote>;
+begin
+  FSource.Add(TNote.Create(600, 'Project Alpha', '', ncYellow));
+  FSource[0].AddTag('work');
+  FSource[0].AddChecklistItem('Design review');
+
+  FSource.Add(TNote.Create(601, 'Personal Items', '', ncGreen));
+  FSource[1].AddTag('personal');
+  FSource[1].AddChecklistItem('Buy groceries');
+
+  // Search matches title
+  Results := FQuery.Search('Project Alpha', FSource);
+  try
+    Assert.AreEqual(1, Results.Count);
+    Assert.AreEqual<Int64>(600, Results[0].ID);
+  finally
+    Results.Free;
+  end;
+
+  // Search matches tag
+  Results := FQuery.Search('work', FSource);
+  try
+    Assert.AreEqual(1, Results.Count);
+    Assert.AreEqual<Int64>(600, Results[0].ID);
+  finally
+    Results.Free;
+  end;
+
+  // Search matches checklist item
+  Results := FQuery.Search('groceries', FSource);
+  try
+    Assert.AreEqual(1, Results.Count);
+    Assert.AreEqual<Int64>(601, Results[0].ID);
   finally
     Results.Free;
   end;

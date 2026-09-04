@@ -18,7 +18,7 @@ uses
   Winapi.Windows, System.SysUtils, System.Classes,
   System.Generics.Collections,
   Vcl.Graphics, Vcl.Controls, Vcl.Forms, Vcl.StdCtrls, Vcl.ComCtrls,
-  uNote, uNoteManager, uNoteQuery;
+  uNote, uNoteManager, uNoteQuery, System.StrUtils;
 
 type
   TOpenNoteEvent = procedure(ANote: TNote) of object;
@@ -162,6 +162,21 @@ begin
           else
             Item.Caption := Note.Title;
           Item.SubItems.Add(FormatDateTime('yyyy-mm-dd hh:nn', Note.UpdatedAt));
+
+          // Phase 6A Part 2: Add tags and checklist count to the list view
+          if Length(Note.Tags) > 0 then
+          begin
+            Item.SubItems.Add(Format('Tags: %s', [String.Join(', ', Note.Tags)]));
+          end
+          else if Length(Note.ChecklistItems) > 0 then
+          begin
+            Item.SubItems.Add(Format('Checklist: %d items', [Length(Note.ChecklistItems)]));
+          end
+          else
+          begin
+            Item.SubItems.Add('');
+          end;
+
           Item.Data := Pointer(Note);  // display-only reference, NOT owned
         end;
       finally

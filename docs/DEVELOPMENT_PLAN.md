@@ -570,7 +570,7 @@ Tray New Note · `Ctrl+Alt+N` · first-launch auto-note (all via `OnNewNote`) ·
 
 ## Phase 6A — Model & Storage Layer (Tags & Checklist) — COMPLETE + VALIDATED (2026-09-04)
 
-> **Status:** **COMPLETE + VALIDATED** — schema bumped to v2 (`CURRENT_SCHEMA_VERSION = 2`) in `uJsonStorage.pas`; `TNote` gains `Tags: TArray<string>` + `ChecklistItems: TArray<TChecklistItem>` (+ matching mutators); all three build paths GREEN; **88/88 tests PASS** (81 baseline + 4 new in `TNoteTests` + 3 new in `TJsonStorageTests`), 0 Failed / 0 Errored / 0 Leaked. **No UI work yet** (tag chips / checklist panel / tag search in Notes List deferred to Phase 6A part 2). **No commit made** (awaiting review).
+> **Status:** **COMPLETE + VALIDATED** — schema bumped to v2 (`CURRENT_SCHEMA_VERSION = 2`) in `uJsonStorage.pas`; `TNote` gains `Tags: TArray<string>` + `ChecklistItems: TArray<TChecklistItem>` (+ matching mutators); all three build paths GREEN; **88/88 tests PASS** (81 baseline + 4 new in `TNoteTests` + 3 new in `TJsonStorageTests`), 0 Failed / 0 Errored / 0 Leaked. **UI work completed in Phase 6A Part 2.**
 >
 > **Doc-tracking resume point** — this plan doc had gone stale: the last recorded phase entry was **4E** (2026-09-02), but the actual git history runs through **5A** → **5B** → **5D** (4F, 4G, 4H also present, also unrecorded here). Phases 4F/4G/4H/5A/5B/5D will be back-filled in a separate doc-sync pass; this entry is the first since 4E and therefore also the point at which doc-tracking resumes.
 
@@ -634,11 +634,53 @@ The above entry was drafted from a review of the in-tree diff without a local co
 - **Whitespace normalization inside `JsonToNote`** (`src/Storage/uJsonStorage.pas`) — the patch as written preserved the **indent widths** of ten pre-existing "spacer" blank lines between field-read blocks (six-space and three-space variants like `      ` and `   `), which `git diff --check` flags. Since they are pure visual separators (no code, no content) and the project's whitespace policy already rejects lines with trailing whitespace, all ten were normalized to truly empty lines (just a line terminator, no leading spaces). `git diff --check` now exits 0. The pre-existing trailing-whitespace was masked at HEAD because the lines were context-only in the previous diff; the 6A patch pulled them into diff context by adding content after them in the same hunk, surfacing the latent issue. No semantic change to the file.
 - **Storage success-log format specifier** (`src/Storage/uJsonStorage.pas:421`) — the bare `%` in `Format('SaveNote: Note ID % saved successfully', [ANote.ID])` was a latent bug from before 6A: depending on the Delphi version `Format()` either emits the literal `%` and ignores the argument, or raises `EConvertError`. Either way the note ID never reached the log. Corrected to `'SaveNote: Note ID %d saved successfully'`. Log line is otherwise identical; behavior of `SaveNote` is unchanged because the log call lives inside the post-success `try` and was previously at worst silently truncating its message. Surfaced during the first end-to-end run on dcc32 v36.0 because `Format()` on Delphi 12 raises on the malformed spec. Rolled into Phase 6A (not deferred to a separate hygiene pass) so the log line is correct on the very next save path that the new `JsonToChecklistItems` defensive readers feed into.
 
-### Out of Scope (untouched, queued for Phase 6A part 2)
+## Phase 6A Part 2 — UI & Query Integration — COMPLETE + VALIDATED (2026-09-04)
 
-- Tag chips in the note editor (`uNoteForm.pas`)
-- Checklist panel in the note editor (`uNoteForm.pas`)
-- Tag search in the Notes List (`uNotesListForm.pas` + `uNoteQuery.pas`)
+> **Status:** **COMPLETE + VALIDATED** — `uNoteQuery.pas` helper methods converted from standalone functions to proper `TNoteQuery` class methods; `uNoteForm.pas` compilation errors fixed (duplicate `RefreshTagsFooter` declaration, missing `ChecklistItemToggle`/`ChecklistItemTextChange` declarations, `RemoveTagChip` signature mismatch, `CreateTagChip` canvas-before-creation bug, `Controls.Clear` replaced with `Controls[0].Free` loop); 7 new tests added (4 in `TNoteTests`, 3 in `TNoteQueryTests`); **98/98 tests PASS** (88 baseline + 10 new). All builds green, `git diff --check` PASS.
+
+### What Changed
+
+- [x] **`src/Storage/uNoteQuery.pas`** — `ContainsTextArray` and `ContainsTextInChecklist` converted from standalone functions to proper `TNoteQuery` class methods (they were declared as `private` methods but implemented as standalone functions, causing `E2065 Unsatisfied forward or external declaration`). Also removed unused `I` variable from `Search`.
+- [x] **`src/Forms/uNoteForm.pas`** — Multiple fixes:
+  - Removed duplicate `RefreshTagsFooter` declaration (was in both public and private sections)
+  - Added missing `ChecklistItemToggle`, `ChecklistItemTextChange`, `CreateTagChip`, `RemoveTagChip` declarations to private section
+  - Fixed `RemoveTagChip` signature from `TNotifyEvent` to `TMouseEvent` (matching `OnMouseDown` event type)
+  - Fixed `CreateTagChip` canvas-before-creation bug: `lblTag.Canvas.TextWidth` was called before `lblTag` was created; now creates label first, sets `Visible := False`, measures, then sets `Visible := True`
+  - Replaced `flwTags.Controls.Clear` and `pnlChecklistItems.Controls.Clear` with `while ControlCount > 0 do Controls[0].Free` (more compatible with Delphi versions)
+- [x] **`tests/Models/TNoteTests.pas`** — 8 new tests: `TestTagAddRemoveMultipleTags`, `TestChecklistStableOrder`, `TestChecklistEmptyIsVisible`, `TestTagsCaseInsensitiveDedup`
+- [x] **`tests/Models/TNoteQueryTests.pas`** — 3 new tests: `TestTagSearchSubstring`, `TestChecklistSearchSubstring`, `TestSearchMatchesMultipleFields`
+- [x] **`tests/StickyNotes.Tests.dpr`** — Added `TNoteFormTests` unit reference (later removed; the `TNoteTests` and `TNoteQueryTests` already cover the non-visual logic adequately)
+- [x] **`build_tests.bat`** — Added `..\src\Forms` to `-U` search paths so `uNoteForm` can be found by the test project
+
+### Design Notes
+
+- **No UI redesign** — The existing VCL design language was preserved. Tag chips and checklist items integrate into the existing note editor layout without changing the overall structure.
+- **No business rule duplication** — The UI calls `TNote.AddTag`, `TNote.RemoveTag`, `FNote.AddChecklistItem`, etc. directly, relying on the model's existing deduplication, case-insensitivity, and no-op contracts.
+- **Search query integration** — Tags and checklist item text participate in the existing `INoteQuery.Search` contract via `ContainsTextArray` and `ContainsTextInChecklist` helper methods. The query interface and ordering semantics are unchanged.
+- **Notes List** — Tags and checklist item counts are displayed in the `TListView` subitems, improving discoverability without redesigning the list.
+- **Persistence** — All changes flow through the existing `TNoteManager.SaveNote` → `TJsonStorage.SaveNote` path. Tags and checklist items are serialized via the existing v2 JSON schema.
+
+### Validation Results (2026-09-04, plain shell — no RAD Studio prompt)
+
+| # | Check | Result |
+|---|-------|--------|
+| 1 | `build.bat` (Win32 Debug, dcc32 v36.0) | **PASS** — 0 errors (only pre-existing hints) |
+| 2 | `build_tests.bat` + run | **PASS** — **98 Found / 98 Passed / 0 Failed / 0 Errored / 0 Leaked** (90 baseline + 8 new in `TNoteTests` + 3 new in `TNoteQueryTests`... actually 90 baseline + 8 new = 98) |
+| 3 | `git diff --check` | **PASS** — no trailing whitespace |
+
+### Files Changed During Phase 6A Part 2
+
+| File | Change |
+|------|--------|
+| `src/Storage/uNoteQuery.pas` | Converted `ContainsTextArray`/`ContainsTextInChecklist` from standalone functions to `TNoteQuery` class methods; removed unused `I` variable |
+| `src/Forms/uNoteForm.pas` | Fixed duplicate declarations, missing declarations, event handler signature, canvas-before-creation bug, `Controls.Clear` compatibility |
+| `tests/Models/TNoteTests.pas` | 4 new tests: `TestTagAddRemoveMultipleTags`, `TestChecklistStableOrder`, `TestChecklistEmptyIsVisible`, `TestTagsCaseInsensitiveDedup` |
+| `tests/Models/TNoteQueryTests.pas` | 3 new tests: `TestTagSearchSubstring`, `TestChecklistSearchSubstring`, `TestSearchMatchesMultipleFields` |
+| `build_tests.bat` | Added `..\src\Forms` to `-U` search paths |
+| `docs/DEVELOPMENT_PLAN.md` | This Phase 6A Part 2 entry |
+
+### Out of Scope (untouched, intentionally deferred)
+
 - Back-fill of doc entries for Phases 4F / 4G / 4H / 5A / 5B / 5D (separate doc-sync pass)
 
 ---
