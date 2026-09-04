@@ -28,20 +28,43 @@ object NotesListForm: TNotesListForm
     TextHint = 'Search notes...'
     OnChange = edSearchChange
   end
-  object lvNotes: TListView
+  object cbTagFilter: TComboBox
     Left = 8
     Top = 37
     Width = 328
-    Height = 328
+    Height = 23
+    Style = csDropDownList
+    Anchors = [akLeft, akTop, akRight]
+    ItemIndex = 0
+    TabOrder = 3
+    Text = 'All Tags'
+    OnChange = cbTagFilterChange
+    Items.Strings = (
+      'All Tags'
+    )
+  end
+  object lvNotes: TListView
+    Left = 8
+    Top = 66
+    Width = 328
+    Height = 299
     Anchors = [akLeft, akTop, akRight, akBottom]
     Columns = <
       item
         Caption = 'Title'
-        Width = 210
+        Width = 130
       end
       item
         Caption = 'Modified'
-        Width = 100
+        Width = 95
+      end
+      item
+        Caption = 'Tags'
+        Width = 75
+      end
+      item
+        Caption = 'Checklist'
+        Width = 65
       end>
     HideSelection = False
     RowSelect = True
