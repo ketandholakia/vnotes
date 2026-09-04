@@ -60,6 +60,36 @@ type
     procedure TestChecklistSearchSubstring;
     [Test]
     procedure TestSearchMatchesMultipleFields;
+    // Phase 6B.1: distinct tags
+    [Test]
+    procedure TestDistinctTagsUnique;
+    [Test]
+    procedure TestDistinctTagsCaseInsensitiveUnique;
+    [Test]
+    procedure TestDistinctTagsWhitespaceIgnored;
+    [Test]
+    procedure TestDistinctTagsDeterministicOrder;
+    [Test]
+    procedure TestDistinctTagsEmptyCollection;
+    [Test]
+    procedure TestDistinctTagsNoMutation;
+    // Phase 6B.1: tag filtering
+    [Test]
+    procedure TestFilterByTagExactMatch;
+    [Test]
+    procedure TestFilterByTagCaseInsensitive;
+    [Test]
+    procedure TestFilterByTagTrimsInput;
+    [Test]
+    procedure TestFilterByTagNotSubstring;
+    [Test]
+    procedure TestFilterByTagEmptyTagReturnsEmpty;
+    [Test]
+    procedure TestFilterByTagDeterministicOrdering;
+    [Test]
+    procedure TestFilterByTagMultipleMatchingNotes;
+    [Test]
+    procedure TestFilterByTagNonOwning;
   end;
 
 implementation
@@ -577,6 +607,274 @@ begin
   finally
     Results.Free;
   end;
+end;
+
+// Phase 6B.1: distinct tags
+
+procedure TNoteQueryTestFixture.TestDistinctTagsUnique;
+var
+  Tags: TArray<string>;
+begin
+  FSource.Add(TNote.Create(700, 'A', '', ncYellow));
+  FSource[0].AddTag('work');
+  FSource[0].AddTag('urgent');
+  FSource.Add(TNote.Create(701, 'B', '', ncGreen));
+  FSource[1].AddTag('work'); // duplicate across notes
+  FSource[1].AddTag('personal');
+
+  Tags := FQuery.DistinctTags(FSource);
+  Assert.AreEqual(3, Length(Tags), 'Duplicates collapse to one entry');
+  Assert.AreEqual('personal', Tags[0]);
+  Assert.AreEqual('urgent', Tags[1]);
+  Assert.AreEqual('work', Tags[2]);
+end;
+
+procedure TNoteQueryTestFixture.TestDistinctTagsCaseInsensitiveUnique;
+var
+  Tags: TArray<string>;
+begin
+  FSource.Add(TNote.Create(710, 'A', '', ncYellow));
+  FSource[0].AddTag('Work');
+  FSource.Add(TNote.Create(711, 'B', '', ncGreen));
+  FSource[1].AddTag('WORK');
+  FSource.Add(TNote.Create(712, 'C', '', ncBlue));
+  FSource[2].AddTag('work');
+
+  Tags := FQuery.DistinctTags(FSource);
+  Assert.AreEqual(1, Length(Tags), 'Case variants collapse to one tag');
+  // Casing of the first occurrence is kept.
+  Assert.AreEqual('Work', Tags[0]);
+end;
+
+procedure TNoteQueryTestFixture.TestDistinctTagsWhitespaceIgnored;
+var
+  Tags: TArray<string>;
+begin
+  FSource.Add(TNote.Create(720, 'A', '', ncYellow));
+  FSource[0].AddTag('  spaced  '); // trims to 'spaced'
+  FSource[0].AddTag('   ');        // whitespace-only: ignored
+  FSource.Add(TNote.Create(721, 'B', '', ncGreen));
+  FSource[1].AddTag('spaced');     // duplicate after trim
+
+  Tags := FQuery.DistinctTags(FSource);
+  Assert.AreEqual(1, Length(Tags));
+  Assert.AreEqual('spaced', Tags[0]);
+end;
+
+procedure TNoteQueryTestFixture.TestDistinctTagsDeterministicOrder;
+var
+  Tags: TArray<string>;
+begin
+  FSource.Add(TNote.Create(730, 'A', '', ncYellow));
+  FSource[0].AddTag('zeta');
+  FSource[0].AddTag('alpha');
+  FSource.Add(TNote.Create(731, 'B', '', ncGreen));
+  FSource[1].AddTag('Mike');
+  FSource[1].AddTag('beta');
+
+  Tags := FQuery.DistinctTags(FSource);
+  Assert.AreEqual(4, Length(Tags));
+  Assert.AreEqual('alpha', Tags[0]);
+  Assert.AreEqual('beta', Tags[1]);
+  Assert.AreEqual('Mike', Tags[2]);
+  Assert.AreEqual('zeta', Tags[3]);
+end;
+
+procedure TNoteQueryTestFixture.TestDistinctTagsEmptyCollection;
+var
+  Tags: TArray<string>;
+begin
+  Tags := FQuery.DistinctTags(FSource);
+  Assert.AreEqual(0, Length(Tags), 'Empty collection => empty result');
+
+  Tags := FQuery.DistinctTags(nil);
+  Assert.AreEqual(0, Length(Tags), 'Nil collection => empty result');
+end;
+
+procedure TNoteQueryTestFixture.TestDistinctTagsNoMutation;
+var
+  Tags: TArray<string>;
+  N: TNote;
+begin
+  N := TNote.Create(740, 'A', '', ncYellow);
+  N.AddTag('zulu');
+  FSource.Add(N);
+  FSource.Add(TNote.Create(741, 'B', '', ncGreen));
+  FSource[1].AddTag('alpha');
+
+  Tags := FQuery.DistinctTags(FSource);
+  Assert.AreEqual(2, Length(Tags));
+  // Source notes untouched: tag order/ownership unchanged.
+  Assert.AreEqual(1, Length(FSource[0].Tags));
+  Assert.AreEqual('zulu', FSource[0].Tags[0]);
+  Assert.AreEqual(1, Length(FSource[1].Tags));
+  Assert.AreEqual('alpha', FSource[1].Tags[0]);
+end;
+
+// Phase 6B.1: tag filtering
+
+procedure TNoteQueryTestFixture.TestFilterByTagExactMatch;
+var
+  Results: TObjectList<TNote>;
+begin
+  FSource.Add(TNote.Create(750, 'A', '', ncYellow));
+  FSource[0].AddTag('work');
+  FSource.Add(TNote.Create(751, 'B', '', ncGreen));
+  FSource[1].AddTag('personal');
+
+  Results := FQuery.FilterByTag('work', FSource);
+  try
+    Assert.AreEqual(1, Results.Count);
+    Assert.AreEqual<Int64>(750, Results[0].ID);
+  finally
+    Results.Free;
+  end;
+end;
+
+procedure TNoteQueryTestFixture.TestFilterByTagCaseInsensitive;
+var
+  Results: TObjectList<TNote>;
+begin
+  FSource.Add(TNote.Create(760, 'A', '', ncYellow));
+  FSource[0].AddTag('Work');
+
+  Results := FQuery.FilterByTag('WORK', FSource);
+  try
+    Assert.AreEqual(1, Results.Count);
+    Assert.AreEqual<Int64>(760, Results[0].ID);
+  finally
+    Results.Free;
+  end;
+end;
+
+procedure TNoteQueryTestFixture.TestFilterByTagTrimsInput;
+var
+  Results: TObjectList<TNote>;
+begin
+  FSource.Add(TNote.Create(770, 'A', '', ncYellow));
+  FSource[0].AddTag('work');
+
+  Results := FQuery.FilterByTag('  work  ', FSource);
+  try
+    Assert.AreEqual(1, Results.Count);
+    Assert.AreEqual<Int64>(770, Results[0].ID);
+  finally
+    Results.Free;
+  end;
+end;
+
+procedure TNoteQueryTestFixture.TestFilterByTagNotSubstring;
+var
+  Results: TObjectList<TNote>;
+begin
+  FSource.Add(TNote.Create(780, 'A', '', ncYellow));
+  FSource[0].AddTag('project-management');
+
+  // 'project' is a substring of 'project-management' but NOT a tag => no hit.
+  Results := FQuery.FilterByTag('project', FSource);
+  try
+    Assert.AreEqual(0, Results.Count, 'Substring must not match');
+  finally
+    Results.Free;
+  end;
+
+  Results := FQuery.FilterByTag('project-management', FSource);
+  try
+    Assert.AreEqual(1, Results.Count, 'Exact tag matches');
+    Assert.AreEqual<Int64>(780, Results[0].ID);
+  finally
+    Results.Free;
+  end;
+end;
+
+procedure TNoteQueryTestFixture.TestFilterByTagEmptyTagReturnsEmpty;
+var
+  Results: TObjectList<TNote>;
+begin
+  FSource.Add(TNote.Create(790, 'A', '', ncYellow));
+  FSource.Add(TNote.Create(791, 'B', '', ncGreen));
+
+  // Explicitly defined: empty/blank tag matches nothing, not "return all".
+  Results := FQuery.FilterByTag('', FSource);
+  try
+    Assert.AreEqual(0, Results.Count);
+  finally
+    Results.Free;
+  end;
+
+  Results := FQuery.FilterByTag('   ', FSource);
+  try
+    Assert.AreEqual(0, Results.Count);
+  finally
+    Results.Free;
+  end;
+end;
+
+procedure TNoteQueryTestFixture.TestFilterByTagDeterministicOrdering;
+var
+  Results: TObjectList<TNote>;
+begin
+  FSource.Add(TNote.Create(1, 'N1', '', ncYellow));
+  FSource.Add(TNote.Create(2, 'N2', '', ncGreen));
+  FSource.Add(TNote.Create(3, 'N3', '', ncBlue));
+  FSource[0].AddTag('work');
+  FSource[1].AddTag('work');
+  FSource[2].AddTag('work');
+  FSource[0].UpdatedAt := Stamp(300);  // newest
+  FSource[1].UpdatedAt := Stamp(100);  // oldest
+  FSource[2].UpdatedAt := Stamp(200);
+
+  Results := FQuery.FilterByTag('work', FSource);
+  try
+    Assert.AreEqual(3, Results.Count);
+    Assert.AreEqual<Int64>(1, Results[0].ID);  // UpdatedAt DESC
+    Assert.AreEqual<Int64>(3, Results[1].ID);
+    Assert.AreEqual<Int64>(2, Results[2].ID);
+  finally
+    Results.Free;
+  end;
+end;
+
+procedure TNoteQueryTestFixture.TestFilterByTagMultipleMatchingNotes;
+var
+  Results: TObjectList<TNote>;
+begin
+  FSource.Add(TNote.Create(5, 'N5', '', ncYellow));
+  FSource.Add(TNote.Create(4, 'N4', '', ncGreen));
+  FSource[0].AddTag('work');
+  FSource[1].AddTag('work');
+  FSource[0].UpdatedAt := Stamp(150);
+  FSource[1].UpdatedAt := Stamp(150);  // tie => ID DESC
+
+  Results := FQuery.FilterByTag('work', FSource);
+  try
+    Assert.AreEqual(2, Results.Count);
+    Assert.AreEqual<Int64>(5, Results[0].ID);  // higher ID first on tie
+    Assert.AreEqual<Int64>(4, Results[1].ID);
+  finally
+    Results.Free;
+  end;
+end;
+
+procedure TNoteQueryTestFixture.TestFilterByTagNonOwning;
+var
+  Results: TObjectList<TNote>;
+begin
+  FSource.Add(TNote.Create(800, 'Keep Me', '', ncYellow));
+  FSource[0].AddTag('work');
+
+  Results := FQuery.FilterByTag('work', FSource);
+  try
+    Assert.AreEqual(1, Results.Count);
+    Assert.IsFalse(Results.OwnsObjects, 'FilterByTag result must NOT own notes');
+    Assert.AreEqual('Keep Me', Results[0].Title);
+  finally
+    Results.Free;
+  end;
+
+  // Source note must survive result-list disposal.
+  Assert.AreEqual(1, FSource.Count, 'Source notes must survive');
+  Assert.AreEqual('Keep Me', FSource[0].Title);
 end;
 
 initialization

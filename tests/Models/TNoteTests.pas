@@ -32,6 +32,15 @@ type
     procedure TestChecklistEmptyIsVisible;
     [Test]
     procedure TestTagsCaseInsensitiveDedup;
+    // Phase 6B.1: derived checklist progress helpers.
+    [Test]
+    procedure TestChecklistProgressEmpty;
+    [Test]
+    procedure TestChecklistProgressAllIncomplete;
+    [Test]
+    procedure TestChecklistProgressAllComplete;
+    [Test]
+    procedure TestChecklistProgressPartial;
   end;
 
 implementation
@@ -336,6 +345,78 @@ begin
     Assert.AreEqual('WORK', Note.Tags[0], 'Tag should be trimmed');
     Assert.IsTrue(Note.HasTag('work'), 'Case-insensitive lookup works');
     Assert.IsTrue(Note.HasTag('Work'), 'Case-insensitive lookup works');
+  finally
+    Note.Free;
+  end;
+end;
+
+// Phase 6B.1: checklist progress helpers
+
+procedure TNoteTestFixture.TestChecklistProgressEmpty;
+var
+  Note: TNote;
+begin
+  Note := TNote.Create;
+  try
+    Assert.AreEqual(0, Note.ChecklistDoneCount, 'Empty checklist => 0 done');
+    Assert.AreEqual(0, Note.ChecklistTotalCount, 'Empty checklist => 0 total');
+  finally
+    Note.Free;
+  end;
+end;
+
+procedure TNoteTestFixture.TestChecklistProgressAllIncomplete;
+var
+  Note: TNote;
+begin
+  Note := TNote.Create;
+  try
+    Note.AddChecklistItem('Task A');
+    Note.AddChecklistItem('Task B');
+    Note.AddChecklistItem('Task C');
+    Assert.AreEqual(0, Note.ChecklistDoneCount, 'Nothing done yet');
+    Assert.AreEqual(3, Note.ChecklistTotalCount, 'Three items total');
+  finally
+    Note.Free;
+  end;
+end;
+
+procedure TNoteTestFixture.TestChecklistProgressAllComplete;
+var
+  Note: TNote;
+begin
+  Note := TNote.Create;
+  try
+    Note.AddChecklistItem('Task A', True);
+    Note.AddChecklistItem('Task B', True);
+    Assert.AreEqual(2, Note.ChecklistDoneCount, 'All items done');
+    Assert.AreEqual(2, Note.ChecklistTotalCount, 'Two items total');
+    // Done can never exceed total when derived from the item array.
+    Assert.IsTrue(Note.ChecklistDoneCount <= Note.ChecklistTotalCount);
+  finally
+    Note.Free;
+  end;
+end;
+
+procedure TNoteTestFixture.TestChecklistProgressPartial;
+var
+  Note: TNote;
+begin
+  Note := TNote.Create;
+  try
+    Note.AddChecklistItem('Task A');          // incomplete
+    Note.AddChecklistItem('Task B', True);    // done
+    Note.AddChecklistItem('Task C');          // incomplete
+    Note.AddChecklistItem('Task D', True);    // done
+    // Counts are order-independent: derived from Done flags, not positions.
+    Assert.AreEqual(2, Note.ChecklistDoneCount, 'Two items done');
+    Assert.AreEqual(4, Note.ChecklistTotalCount, 'Four items total');
+
+    Note.ToggleChecklistItem(0);
+    Assert.AreEqual(3, Note.ChecklistDoneCount, 'After toggle, three done');
+    Note.RemoveChecklistItem(3);
+    Assert.AreEqual(2, Note.ChecklistDoneCount, 'Removing a done item lowers done count');
+    Assert.AreEqual(3, Note.ChecklistTotalCount, 'Three items remain');
   finally
     Note.Free;
   end;

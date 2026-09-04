@@ -75,6 +75,10 @@ type
     procedure RemoveChecklistItem(AIndex: Integer);
     procedure ToggleChecklistItem(AIndex: Integer);
     procedure SetChecklistItemText(AIndex: Integer; const AText: string);
+    // Phase 6B.1: purely derived checklist progress. No stored duplicate
+    // state - computed on demand from FChecklistItems. Empty checklist => 0/0.
+    function ChecklistDoneCount: Integer;
+    function ChecklistTotalCount: Integer;
   end;
 
   TNoteList = TObjectList<TNote>;
@@ -279,6 +283,21 @@ begin
   if (AIndex < 0) or (AIndex > High(FChecklistItems)) then
     Exit;
   FChecklistItems[AIndex].Text := AText;
+end;
+
+function TNote.ChecklistDoneCount: Integer;
+var
+  Item: TChecklistItem;
+begin
+  Result := 0;
+  for Item in FChecklistItems do
+    if Item.Done then
+      Inc(Result);
+end;
+
+function TNote.ChecklistTotalCount: Integer;
+begin
+  Result := Length(FChecklistItems);
 end;
 
 end.
