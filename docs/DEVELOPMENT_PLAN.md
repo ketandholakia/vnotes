@@ -728,5 +728,62 @@ The above entry was drafted from a review of the in-tree diff without a local co
 
 ---
 
+## Phase 6C — Favorite / Starred Notes — COMPLETE + CLOSED (2026-09-05)
+
+> **Status:** **COMPLETE + CLOSED** — model/storage/query foundation (6C.1) + UI integration (6C.2) + final validation pass (6C.3); no schema change beyond v3, no persistence changes beyond the `favorite` pair, no UI redesign; **127/127 tests PASS** (116 baseline + 11 new), 0 Failed / 0 Errored / 0 Leaked. Manual GUI smoke: **18/18 PASS (user-verified)**.
+
+### What Changed
+
+- [x] **6C.1 — foundation** (`e95288f`)
+  - `TNote` gains `Favorite: Boolean` (default `False` in both constructors) + `ToggleFavorite` (plain flip, no `Touch` — `UpdatedAt` is stamped by the existing `TNoteManager.SaveNote` path); `Assign`/`Clone` copy the flag; `IsEmpty` ignores it.
+  - JSON schema bumped to v3 (`CURRENT_SCHEMA_VERSION = 3`); `NoteToJson` writes `"favorite"`; the reader is tolerant (absent on v0/v1/v2 files, or wrong-typed, → `False`, same policy as the other boolean flags). Future/invalid schema rejection unchanged.
+  - `TNoteQuery.CompareForRecency` sorts Favorite-first; legacy `UpdatedAt` DESC / `ID` DESC order holds within each group, so all-`False` collections order exactly as before. `Search` + `FilterByTag` share the comparer; the ownership contract (`OwnsObjects = False`) is unchanged.
+  - 11 new tests (4 in `TNoteTests`, 4 in `TJsonStorageTests`, 3 in `TNoteQueryTests`): default, toggle (+ no-`Touch`), assign/clone, `IsEmpty`, round-trip, legacy v0/v1/v2 default, v3-missing default, malformed degrade, search favorite-first, ID tie-break, tag-filter favorite-first. `TestSaveWritesSchemaVersion` now expects `3`.
+- [x] **6C.2 — UI integration** (`fe8c5ac`, Forms only)
+  - `TNoteForm`: `btnFavorite` header button (`★` = favorite, `☆` = not — same caption-swap pattern as lock/collapse); locked-note guard (button disabled + handler no-op); the toggle persists via the existing `ScheduleSave` autosave path (no new save mechanism).
+  - `TNotesListForm`: `★` column (5th column; every row adds exactly four subitems so columns stay aligned); ordering comes from the query layer, the list never re-sorts.
+  - `TTrayForm.OnNoteChanged` now resyncs an open Notes List (previously only create/delete did), so the star indicator and Favorite-first ordering appear after any save.
+  - Pin / AlwaysOnTop untouched and independent of Favorite.
+- [x] **6C.3 — final validation (this pass)**: read-only implementation review + regression grep + full automated validation; no implementation changes required. Test suite left unchanged: the 11 existing 6C.1 tests already cover every core behavior in the 6C.3 checklist (default, assign/copy, round-trip, legacy compat, malformed handling, favorite-first ordering, same-timestamp tie-break, search ordering, tag-filter ordering); UI-only paths have no VCL test harness (same policy as 6B.2) and were covered by the user's 18/18 manual GUI pass.
+
+### Validation Results (2026-09-05)
+
+| # | Check | Result |
+|---|-------|--------|
+| 1 | `build.bat` (Win32 Debug, dcc32 v36.0) | **Output-locked, not failed** — `F2039 Could not create output file 'StickyNotes.exe'` because the user's live app (PID 10780, `src\StickyNotes.exe`) holds the image; the process was deliberately not killed. **Identical dcc32 command with a temp `-E` output dir: PASS** — exit 0, 0 errors, only pre-existing hints |
+| 2 | `build_tests.bat` + run | **PASS** — **127 Found / 127 Passed / 0 Failed / 0 Errored / 0 Skipped / 0 Leaked** (116 baseline + 11 new from 6C.1) |
+| 3 | `git diff --check` | **PASS** |
+| 4 | Working tree after builds | **CLEAN** — no build artifacts reappeared |
+| 5 | Manual GUI smoke (18 behaviors) | **PASS — user-verified** (not performed by the agent) |
+
+### Invariants Confirmed (6C.3 review)
+
+- Favorite never calls `Touch`; changes flow through `ScheduleSave` → `TNoteManager.SaveNote`.
+- Pin / AlwaysOnTop completely independent; search / tag-filter / checklist / autosave semantics intact.
+- Result lists remain non-owning; ordering deterministic (Favorite, UpdatedAt DESC, ID DESC).
+- Single Favorite field, single JSON pair, single toggle — no duplicate state, no second persistence path.
+- No archive / reminder / rich-text / sync / SQLite functionality added.
+
+### Files Changed During Phase 6C
+
+| File | Change |
+|------|--------|
+| `src/Models/uNote.pas` | `FFavorite` field, `Favorite` property, `ToggleFavorite`, default `False`, `Assign` copy |
+| `src/Storage/uJsonStorage.pas` | Schema v3, `Favorite` writer + tolerant reader, version-comment update |
+| `src/Storage/uNoteQuery.pas` | Favorite-first `CompareForRecency` (+ doc comments on `INoteQuery`) |
+| `src/Forms/uNoteForm.pas` + `.dfm` | `btnFavorite`, `UpdateFavoriteButton`, locked guard, `ScheduleSave` toggle |
+| `src/Forms/uNotesListForm.pas` + `.dfm` | `★` column + star subitem per row |
+| `src/Forms/uTrayForm.pas` | `OnNoteChanged` list resync |
+| `tests/Models/TNoteTests.pas` | 4 new Favorite tests |
+| `tests/Models/TJsonStorageTests.pas` | 4 new Favorite tests; schema assertion → `3` |
+| `tests/Models/TNoteQueryTests.pas` | 3 new Favorite-ordering tests |
+| `docs/DEVELOPMENT_PLAN.md` | This Phase 6C closure entry |
+
+### Out of Scope (untouched, follow-up candidate)
+
+- `TBackupService` uses its own legacy note serializer (no `schemaVersion`, no tags/checklistItems, no favorite): a backup → restore round-trip drops all Phase 6A/6C fields. Pre-existing since 6A (not a 6C regression); changing the backup format is a separate task.
+
+---
+
 *Document created: 2026-08-31*
-*Last updated: 2026-09-04*
+*Last updated: 2026-09-05*
