@@ -160,6 +160,7 @@ end;
 procedure TNoteForm.FormCreate(Sender: TObject);
 begin
   TWindowUtils.EnableBorderlessWindow(Self);
+  SetWindowLong(Handle, GWL_STYLE, GetWindowLong(Handle, GWL_STYLE) or WS_THICKFRAME);
   DoubleBuffered := True;
 
   // Header panel setup
