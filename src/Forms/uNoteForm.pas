@@ -187,7 +187,7 @@ begin
 
   // Title editor
   edTitle.Align := alTop;
-  edTitle.Height := 24;
+  edTitle.Height := 28;
   edTitle.BorderStyle := bsNone;
   edTitle.Font.Name := 'Segoe UI';
   edTitle.Font.Size := 11;
@@ -341,7 +341,7 @@ begin
   pnlHeader.Color := TColorUtils.DarkenColor(C, 20);
   mmContent.Color := C;
   mmContent.Font.Color := FEditorContext.GetNoteTextColor(FNote.Color);
-  edTitle.Color := C;
+  edTitle.Color := TColorUtils.AdjustBrightness(C, -8);
   edTitle.Font.Color := mmContent.Font.Color;
 
   btnClose.Font.Color := mmContent.Font.Color;

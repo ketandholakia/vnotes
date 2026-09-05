@@ -100,7 +100,7 @@ object NoteForm: TNoteForm
     Left = 0
     Top = 32
     Width = 300
-    Height = 24
+    Height = 28
     Align = alTop
     BorderStyle = bsNone
     Font.Charset = DEFAULT_CHARSET
@@ -112,9 +112,18 @@ object NoteForm: TNoteForm
     TabOrder = 1
     OnChange = edTitleChange
   end
+  object sepTitle: TBevel
+    Left = 0
+    Top = 60
+    Width = 300
+    Height = 4
+    Align = alTop
+    Shape = bsBottomLine
+    Style = bsLowered
+  end
   object mmContent: TMemo
     Left = 0
-    Top = 56
+    Top = 64
     Width = 300
     Height = 170
     StyleElements = [seBorder]
