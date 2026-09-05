@@ -18,7 +18,7 @@ type
     FBackupPath: string;
     FOnProgress: TBackupProgress;
     FOnComplete: TBackupComplete;
-    function GetBackupFileName: string;
+    FLastBackupFile: string;
     function CreateBackupZip(const AZipFile: string): Boolean;
     procedure DoRestore(const ABackupFile: string; const ALogger: ILogger);
     procedure CreateManifest(const ATempDir: string; const ALogger: ILogger);
@@ -31,6 +31,7 @@ type
     procedure Backup;
     procedure Restore(const ABackupFile: string);
     procedure CleanupOldBackups;
+    function GetBackupFileName: string;
     property OnProgress: TBackupProgress read FOnProgress write FOnProgress;
     property OnComplete: TBackupComplete read FOnComplete write FOnComplete;
   end;
@@ -75,11 +76,13 @@ begin
 end;
 
 function TBackupService.GetBackupFileName: string;
-var
-  DateStr: string;
 begin
-  DateStr := FormatDateTime('yyyymmdd_hhnnss', Now);
-  Result := TPath.Combine(FBackupPath, 'StickyNotes_Backup_' + DateStr + '.zip');
+  if FLastBackupFile <> '' then
+    Result := FLastBackupFile
+  else
+  begin
+    Result := TPath.Combine(FBackupPath, 'StickyNotes_Backup_' + FormatDateTime('yyyymmdd_hhnnss', Now) + '.zip');
+  end;
 end;
 
 procedure TBackupService.Backup;
@@ -92,7 +95,8 @@ begin
     FOnProgress('Creating backup...', 0);
 
   Logger := CreateLogger;
-  ZipFile := GetBackupFileName;
+  FLastBackupFile := TPath.Combine(FBackupPath, 'StickyNotes_Backup_' + FormatDateTime('yyyymmdd_hhnnss', Now) + '.zip');
+  ZipFile := FLastBackupFile;
   Success := CreateBackupZip(ZipFile);
 
   if Success then
@@ -126,6 +130,11 @@ var
   Stream: TStringStream;
   I: Integer;
   Logger: ILogger;
+  TagsArray: System.JSON.TJSONArray;
+  ChecklistArray: System.JSON.TJSONArray;
+  Tag: string;
+  ChecklistItem: TChecklistItem;
+  ItemJson: System.JSON.TJSONObject;
 begin
   Result := False;
   Logger := CreateLogger;
@@ -146,6 +155,7 @@ begin
       Note := FNoteManager.Notes[I];
       Json := System.JSON.TJSONObject.Create;
       try
+        Json.AddPair('schemaVersion', System.JSON.TJSONNumber.Create(3));
         Json.AddPair('ID', System.JSON.TJSONNumber.Create(Note.ID));
         Json.AddPair('Title', Note.Title);
         Json.AddPair('Content', Note.Content);
@@ -157,8 +167,46 @@ begin
         Json.AddPair('AlwaysOnTop', System.JSON.TJSONBool.Create(Note.AlwaysOnTop));
         Json.AddPair('Collapsed', System.JSON.TJSONBool.Create(Note.Collapsed));
         Json.AddPair('Locked', System.JSON.TJSONBool.Create(Note.Locked));
+        Json.AddPair('Favorite', System.JSON.TJSONBool.Create(Note.Favorite));
         Json.AddPair('CreatedAt', DateTimeToISO8601(Note.CreatedAt));
         Json.AddPair('UpdatedAt', DateTimeToISO8601(Note.UpdatedAt));
+
+        // Serialize tags
+        if Length(Note.Tags) > 0 then
+        begin
+          TagsArray := System.JSON.TJSONArray.Create;
+          try
+            for Tag in Note.Tags do
+              TagsArray.Add(Tag);
+            Json.AddPair('tags', TagsArray);
+          except
+            TagsArray.Free;
+            raise;
+          end;
+        end
+        else
+          Json.AddPair('tags', System.JSON.TJSONArray.Create);
+
+        // Serialize checklist items
+        if Length(Note.ChecklistItems) > 0 then
+        begin
+          ChecklistArray := System.JSON.TJSONArray.Create;
+          try
+            for ChecklistItem in Note.ChecklistItems do
+            begin
+              ItemJson := System.JSON.TJSONObject.Create;
+              ItemJson.AddPair('text', TJSONString.Create(ChecklistItem.Text));
+              ItemJson.AddPair('done', TJSONBool.Create(ChecklistItem.Done));
+              ChecklistArray.AddElement(ItemJson);
+            end;
+            Json.AddPair('checklistItems', ChecklistArray);
+          except
+            ChecklistArray.Free;
+            raise;
+          end;
+        end
+        else
+          Json.AddPair('checklistItems', System.JSON.TJSONArray.Create);
 
         JsonText := Json.Format;
         FileName := TPath.Combine(NotesPath, Format('%.10d.json', [Note.ID]));
@@ -229,6 +277,16 @@ var
   PreRestoreBackup: string;
   RestoredNotes: TObjectList<TNote>;
   I: Integer;
+  FavoriteJsonVal: System.JSON.TJSONValue;
+  TagsVal, ChecklistVal: System.JSON.TJSONValue;
+  TagsArr, ChecklistArr: System.JSON.TJSONArray;
+  Elem: System.JSON.TJSONValue;
+  Tags: TArray<string>;
+  Checklist: TArray<TChecklistItem>;
+  ItemObj: System.JSON.TJSONObject;
+  TextVal, DoneVal: System.JSON.TJSONValue;
+  ItemText: string;
+  ItemDone: Boolean;
 begin
   TempDir := TPath.Combine(TPath.GetTempPath, 'StickyNotes_Restore_' + FormatDateTime('yyyymmdd_hhnnss', Now));
   PreRestoreBackup := '';
@@ -239,7 +297,7 @@ begin
     begin
       ALogger.Error(Format('Restore: Backup file not found: %s', [ABackupFile]));
       if Assigned(FOnComplete) then
-        FOnComplete(False, 'Backup file not found');
+        FOnComplete(False, 'Restore failed: Backup file not found');
       Exit;
     end;
 
@@ -269,7 +327,7 @@ begin
       begin
         ALogger.Error(Format('Restore: Failed to extract backup archive: %s', [E.Message]));
         if Assigned(FOnComplete) then
-          FOnComplete(False, 'Failed to extract backup: ' + E.Message);
+          FOnComplete(False, 'Restore failed: Failed to extract backup');
         Exit;
       end;
     end;
@@ -279,7 +337,7 @@ begin
     begin
       ALogger.Error('Restore: Backup structure validation failed');
       if Assigned(FOnComplete) then
-        FOnComplete(False, 'Backup format is incompatible');
+        FOnComplete(False, 'Restore failed: Backup format is incompatible');
       Exit;
     end;
 
@@ -322,6 +380,59 @@ begin
             else
               Note.UpdatedAt := Now;
 
+            // v3: Favorite (tolerant: missing/wrong-typed -> False)
+            FavoriteJsonVal := Json.GetValue('Favorite');
+            if (FavoriteJsonVal <> nil) and (FavoriteJsonVal is TJSONTrue) then
+              Note.Favorite := True
+            else
+              Note.Favorite := False;
+
+            // v3: tags (tolerant: missing/wrong-typed -> empty)
+            TagsVal := Json.GetValue('tags');
+            if (TagsVal <> nil) and (TagsVal is TJSONArray) then
+            begin
+              TagsArr := TagsVal as TJSONArray;
+              SetLength(Tags, 0);
+              for Elem in TagsArr do
+              begin
+                if Elem is TJSONString then
+                begin
+                  SetLength(Tags, Length(Tags) + 1);
+                  Tags[High(Tags)] := Elem.Value;
+                end;
+              end;
+              Note.Tags := Tags;
+            end
+            else
+              Note.Tags := nil;
+
+            // v3: checklistItems (tolerant: missing/wrong-typed -> empty)
+            ChecklistVal := Json.GetValue('checklistItems');
+            if (ChecklistVal <> nil) and (ChecklistVal is TJSONArray) then
+            begin
+              ChecklistArr := ChecklistVal as TJSONArray;
+              SetLength(Checklist, 0);
+              for Elem in ChecklistArr do
+              begin
+                if Elem is TJSONObject then
+                begin
+                  ItemObj := Elem as TJSONObject;
+                  TextVal := ItemObj.GetValue('text');
+                  DoneVal := ItemObj.GetValue('done');
+                  if (TextVal <> nil) and (TextVal is TJSONString) then
+                    ItemText := TextVal.Value
+                  else
+                    ItemText := '';
+                  ItemDone := (DoneVal <> nil) and (DoneVal is TJSONTrue);
+                  SetLength(Checklist, Length(Checklist) + 1);
+                  Checklist[High(Checklist)] := TChecklistItem.Create(ItemText, ItemDone);
+                end;
+              end;
+              Note.ChecklistItems := Checklist;
+            end
+            else
+              Note.ChecklistItems := nil;
+
             RestoredNotes.Add(Note);
           finally
             Json.Free;
@@ -349,7 +460,9 @@ begin
         FNoteManager.DeleteNote(Note.ID);
     end;
 
-    // Add restored notes
+    // Transfer ownership: note list must not own objects that have been
+    // accepted by TNoteManager (which has its own OwnsObjects=True list).
+    RestoredNotes.OwnsObjects := False;
     for I := 0 to RestoredNotes.Count - 1 do
     begin
       Note := RestoredNotes[I];

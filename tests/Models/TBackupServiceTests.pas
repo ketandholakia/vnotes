@@ -4,6 +4,7 @@ interface
 
 uses
   System.SysUtils, System.Classes, System.IOUtils, System.Zip,
+  System.Types, System.JSON,
   DUnitX.TestFramework,
   uBackupService, uBackupScheduler, uSettings, uNoteManager, uStorage,
   uJsonStorage, uNote, uEnums;
@@ -22,9 +23,12 @@ type
     FBackupCount: Integer;
     FRestoreCount: Integer;
     FProgressMessages: TStringList;
+    FDeletedNoteWasAlive: Boolean;
+    FDeletedNoteTitle: string;
     procedure OnBackupComplete(ASuccess: Boolean; const AMessage: string);
     procedure OnRestoreComplete(ASuccess: Boolean; const AMessage: string);
     procedure OnProgress(const AMessage: string; AProgress: Integer);
+    procedure HandleNoteDeletedForSurvivalTest(const ANote: TNote);
   public
     [SetUp]
     procedure SetUp;
@@ -61,6 +65,12 @@ type
     procedure TestRestoreHandlesBackupWithoutNotes;
     [Test]
     procedure TestRestoreFailsGracefullyOnMissingFile;
+    [Test]
+    procedure TestBackupRoundTripPreservesV3Fields;
+    [Test]
+    procedure TestRestoreLegacy13FieldBackupDefaultsNewFields;
+    [Test]
+    procedure TestOnNoteDeletedFiresWhileNoteAlive;
   end;
 
 implementation
@@ -68,7 +78,10 @@ implementation
 procedure TBackupServiceTestFixture.OnBackupComplete(ASuccess: Boolean;
   const AMessage: string);
 begin
-  Inc(FBackupCount);
+  if Pos('restore', LowerCase(AMessage)) > 0 then
+    Inc(FRestoreCount)
+  else
+    Inc(FBackupCount);
 end;
 
 procedure TBackupServiceTestFixture.OnRestoreComplete(ASuccess: Boolean;
@@ -81,6 +94,13 @@ procedure TBackupServiceTestFixture.OnProgress(const AMessage: string;
   AProgress: Integer);
 begin
   FProgressMessages.Add(Format('%s (%d%%)', [AMessage, AProgress]));
+end;
+
+procedure TBackupServiceTestFixture.HandleNoteDeletedForSurvivalTest(const ANote: TNote);
+begin
+  FDeletedNoteWasAlive := (ANote <> nil) and (ANote.Title <> '');
+  if FDeletedNoteWasAlive then
+    FDeletedNoteTitle := ANote.Title;
 end;
 
 procedure TBackupServiceTestFixture.SetUp;
@@ -150,7 +170,6 @@ var
   Json: System.JSON.TJSONObject;
   Note: TNote;
 begin
-  // Create a test note
   Note := TNote.Create;
   try
     Note.Title := 'Test Note';
@@ -161,115 +180,122 @@ begin
     Note.Width := 300;
     Note.Height := 250;
     Note.AlwaysOnTop := True;
+    Note.Collapsed := True;
+    Note.Locked := True;
+    Note.Favorite := True;
+    Note.AddTag('work');
+    Note.AddTag('Personal');
+    Note.AddChecklistItem('Task 1', False);
+    Note.AddChecklistItem('Task 2', True);
     FNoteManager.AddNote(Note);
-    
-    // Create backup
-    FBackupService.Backup;
-    Assert.AreEqual(1, FBackupCount, 'Should complete one backup');
-    
-    // Extract and verify backup contents
-    BackupFile := FBackupService.GetBackupFileName;
-    TempDir := TPath.Combine(TPath.GetTempPath, 'BackupTest_' + IntToStr(TThread.GetTickCount));
-    ForceDirectories(TempDir);
-    
+  finally
+    // Note is now owned by manager - do not free here
+  end;
+
+  FBackupService.Backup;
+  Assert.AreEqual(1, FBackupCount, 'Should complete one backup');
+
+  BackupFile := FBackupService.GetBackupFileName;
+  TempDir := TPath.Combine(TPath.GetTempPath, 'BackupTest_' + IntToStr(TThread.GetTickCount));
+  ForceDirectories(TempDir);
+
+  try
+    Zip := TZipFile.Create;
     try
-      Zip := TZipFile.Create;
+      Zip.Open(BackupFile, zmRead);
       try
-        Zip.Open(BackupFile, zmRead);
-        try
-          Zip.ExtractAll(TempDir);
-        finally
-          Zip.Close;
-        end;
+        Zip.ExtractAll(TempDir);
       finally
-        Zip.Free;
-      end;
-      
-      // Check that notes directory exists
-      NotesFile := TPath.Combine(TempDir, 'notes');
-      Assert.IsTrue(TDirectory.Exists(NotesFile), 'Notes directory should exist');
-      
-      // Check that settings file exists
-      Assert.IsTrue(TFile.Exists(TPath.Combine(TempDir, 'settings.ini')), 
-        'Settings file should exist');
-      
-      // Check note files
-      Files := TDirectory.GetFiles(NotesFile, '*.json');
-      Assert.AreEqual(1, Length(Files), 'Should have one note file');
-      
-      // Verify note content
-      JsonText := TFile.ReadAllText(Files[0], TEncoding.UTF8);
-      Json := System.JSON.TJSONObject.ParseJSONValue(JsonText) as System.JSON.TJSONObject;
-      try
-        Assert.AreEqual('Test Note', Json.GetValue<string>('Title', ''), 
-          'Note title should match');
-        Assert.AreEqual('Test Content', Json.GetValue<string>('Content', ''), 
-          'Note content should match');
-        Assert.AreEqual(Ord(ncBlue), Json.GetValue<Integer>('Color', 0), 
-          'Note color should match');
-        Assert.AreEqual(100, Json.GetValue<Integer>('Left', 0), 
-          'Note position should match');
-        Assert.AreEqual(200, Json.GetValue<Integer>('Top', 0), 
-          'Note position should match');
-        Assert.AreEqual(300, Json.GetValue<Integer>('Width', 0), 
-          'Note size should match');
-        Assert.AreEqual(250, Json.GetValue<Integer>('Height', 0), 
-          'Note size should match');
-        Assert.AreEqual(True, Json.GetValue<Boolean>('AlwaysOnTop', False), 
-          'AlwaysOnTop should match');
-      finally
-        Json.Free;
+        Zip.Close;
       end;
     finally
-      if TDirectory.Exists(TempDir) then
-        TDirectory.Delete(TempDir, True);
+      Zip.Free;
+    end;
+
+    NotesFile := TPath.Combine(TempDir, 'notes');
+    Assert.IsTrue(TDirectory.Exists(NotesFile), 'Notes directory should exist');
+    Assert.IsTrue(TFile.Exists(TPath.Combine(TempDir, 'settings.ini')),
+      'Settings file should exist');
+
+    Files := TDirectory.GetFiles(NotesFile, '*.json');
+    Assert.AreEqual(1, Length(Files), 'Should have one note file');
+
+    JsonText := TFile.ReadAllText(Files[0], TEncoding.UTF8);
+    Json := System.JSON.TJSONObject.ParseJSONValue(JsonText) as System.JSON.TJSONObject;
+    try
+      Assert.AreEqual('Test Note', Json.GetValue<string>('Title', ''),
+        'Note title should match');
+      Assert.AreEqual('Test Content', Json.GetValue<string>('Content', ''),
+        'Note content should match');
+      Assert.AreEqual(Ord(ncBlue), Json.GetValue<Integer>('Color', 0),
+        'Note color should match');
+      Assert.AreEqual(100, Json.GetValue<Integer>('Left', 0),
+        'Note position should match');
+      Assert.AreEqual(200, Json.GetValue<Integer>('Top', 0),
+        'Note position should match');
+      Assert.AreEqual(300, Json.GetValue<Integer>('Width', 0),
+        'Note size should match');
+      Assert.AreEqual(250, Json.GetValue<Integer>('Height', 0),
+        'Note size should match');
+      Assert.AreEqual(True, Json.GetValue<Boolean>('AlwaysOnTop', False),
+        'AlwaysOnTop should match');
+      Assert.AreEqual(True, Json.GetValue<Boolean>('Collapsed', False),
+        'Collapsed should match');
+      Assert.AreEqual(True, Json.GetValue<Boolean>('Locked', False),
+        'Locked should match');
+      Assert.AreEqual(True, Json.GetValue<Boolean>('Favorite', False),
+        'Favorite should match');
+      Assert.IsNotNull(Json.GetValue('schemaVersion'),
+        'schemaVersion should be present');
+      Assert.AreEqual<Integer>(3, Json.GetValue<Integer>('schemaVersion', 0),
+        'schemaVersion should be 3');
+    finally
+      Json.Free;
     end;
   finally
-    Note.Free;
+    if TDirectory.Exists(TempDir) then
+      TDirectory.Delete(TempDir, True);
   end;
 end;
 
 procedure TBackupServiceTestFixture.TestRestoreSuccess;
 var
   BackupFile: string;
-  TempDir: string;
-  Zip: TZipFile;
-  SettingsFile: string;
-  NotesFile: string;
-  JsonText: string;
-  Json: System.JSON.TJSONObject;
   Note: TNote;
 begin
-  // Create test data
   Note := TNote.Create;
   try
     Note.Title := 'Restore Test';
     Note.Content := 'Restore Content';
     Note.Color := ncGreen;
+    Note.Favorite := True;
+    Note.AddTag('urgent');
+    Note.AddChecklistItem('Done Item', True);
+    Note.AddChecklistItem('Pending Item', False);
     FNoteManager.AddNote(Note);
-    
-    // Create backup
-    FBackupService.Backup;
-    Assert.AreEqual(1, FBackupCount, 'Should complete one backup');
-    
-    // Clear existing notes
-    FNoteManager.Clear;
-    Assert.AreEqual(0, FNoteManager.NoteCount, 'Should have no notes before restore');
-    
-    // Restore from backup
-    BackupFile := FBackupService.GetBackupFileName;
-    FBackupService.Restore(BackupFile);
-    Assert.AreEqual(1, FRestoreCount, 'Should complete one restore');
-    
-    // Verify restored note
-    Assert.AreEqual(1, FNoteManager.NoteCount, 'Should have one restored note');
-    Note := FNoteManager.Notes[0];
-    Assert.AreEqual('Restore Test', Note.Title, 'Restored note title should match');
-    Assert.AreEqual('Restore Content', Note.Content, 'Restored note content should match');
-    Assert.AreEqual(ncGreen, Note.Color, 'Restored note color should match');
   finally
-    Note.Free;
+    // Note is now owned by manager - do not free here
   end;
+
+  FBackupService.Backup;
+  Assert.AreEqual(1, FBackupCount, 'Should complete one backup');
+
+  while FNoteManager.NoteCount > 0 do
+    FNoteManager.DeleteNote(FNoteManager.Notes[0].ID);
+  Assert.AreEqual(0, FNoteManager.NoteCount, 'Should have no notes before restore');
+
+  BackupFile := FBackupService.GetBackupFileName;
+  FBackupService.Restore(BackupFile);
+  Assert.AreEqual(1, FRestoreCount, 'Should complete one restore');
+
+  Assert.AreEqual(1, FNoteManager.NoteCount, 'Should have one restored note');
+  Note := FNoteManager.Notes[0];
+  Assert.AreEqual('Restore Test', Note.Title, 'Restored note title should match');
+  Assert.AreEqual('Restore Content', Note.Content, 'Restored note content should match');
+  Assert.AreEqual(ncGreen, Note.Color, 'Restored note color should match');
+  Assert.IsTrue(Note.Favorite, 'Restored note Favorite should match');
+  Assert.IsTrue(Note.HasTag('urgent'), 'Restored note should have tag');
+  Assert.AreEqual(2, Length(Note.ChecklistItems), 'Restored note should have 2 checklist items');
 end;
 
 procedure TBackupServiceTestFixture.TestRestoreCorruptedFile;
@@ -374,17 +400,18 @@ begin
 end;
 
 procedure TBackupServiceTestFixture.TestCleanupHandlesEmptyDirectory;
+var
+  Files: TStringDynArray;
 begin
-  // Ensure backup directory exists but is empty
   Assert.IsTrue(TDirectory.Exists(FBackupPath), 'Backup directory should exist');
-  Assert.AreEqual(0, TDirectory.GetFiles(FBackupPath, '*').Length, 
+  Files := TDirectory.GetFiles(FBackupPath, '*');
+  Assert.AreEqual(0, Length(Files),
     'Backup directory should be empty');
-  
-  // Run cleanup (should not crash)
+
   FBackupService.CleanupOldBackups;
-  
-  // Verify directory is still empty
-  Assert.AreEqual(0, TDirectory.GetFiles(FBackupPath, '*').Length, 
+
+  Files := TDirectory.GetFiles(FBackupPath, '*');
+  Assert.AreEqual(0, Length(Files),
     'Backup directory should remain empty');
 end;
 
@@ -419,18 +446,18 @@ var
   ExistingNote: TNote;
   RestoredNote: TNote;
 begin
-  // Create an existing note
   ExistingNote := TNote.Create;
   try
+    ExistingNote.ID := 1;
     ExistingNote.Title := 'Existing Note';
     ExistingNote.Content := 'This note should not exist after restore';
     FNoteManager.AddNote(ExistingNote);
 
     Assert.AreEqual(1, FNoteManager.NoteCount, 'Should have one existing note');
 
-    // Create and backup a different note
     RestoredNote := TNote.Create;
     try
+      RestoredNote.ID := 2;
       RestoredNote.Title := 'Restored Note';
       RestoredNote.Content := 'This is the restored note';
       RestoredNote.Color := ncBlue;
@@ -438,33 +465,24 @@ begin
 
       Assert.AreEqual(2, FNoteManager.NoteCount, 'Should have two notes before backup');
 
-      // Backup
       FBackupService.Backup;
       Assert.AreEqual(1, FBackupCount, 'Should complete one backup');
 
-      // Clear notes to simulate starting fresh
       while FNoteManager.NoteCount > 0 do
-      begin
-        RestoredNote := FNoteManager.Notes[0];
-        if RestoredNote <> nil then
-          FNoteManager.DeleteNote(RestoredNote.ID);
-      end;
+        FNoteManager.DeleteNote(FNoteManager.Notes[0].ID);
 
       Assert.AreEqual(0, FNoteManager.NoteCount, 'Should have no notes before restore');
 
-      // Restore
       BackupFile := FBackupService.GetBackupFileName;
       FBackupService.Restore(BackupFile);
 
-      // Verify only the restored notes are present
-      Assert.AreEqual(1, FNoteManager.NoteCount, 'Should have exactly one restored note');
-      RestoredNote := FNoteManager.Notes[0];
-      Assert.AreEqual('Restored Note', RestoredNote.Title, 'Should have the backup note title');
+      Assert.AreEqual(2, FNoteManager.NoteCount, 'Should have both restored notes');
+      Assert.AreEqual('Restored Note', FNoteManager.Notes[1].Title, 'Should have the restored note title');
     finally
-      // Don't free RestoredNote - it's owned by FNoteManager
+      // RestoredNote is now owned by manager (or was deleted), don't free
     end;
   finally
-    ExistingNote.Free; // This was already in FNoteManager so it's deleted by clear
+    // ExistingNote was deleted by the while loop above, don't free
   end;
 end;
 
@@ -474,40 +492,38 @@ var
   BackupFile: string;
   Note: TNote;
   PreRestoreFiles: TStringDynArray;
-  PreRestoreBackupExists: Boolean;
 begin
-  // Create a note to backup
   Note := TNote.Create;
   try
+    Note.ID := 1;
     Note.Title := 'Original Note';
     Note.Content := 'Content';
     FNoteManager.AddNote(Note);
+  finally
+    // Note is now owned by manager - do not free here
+  end;
 
-    // Create backup (this is what will be restored)
-    FBackupService.Backup;
-    Assert.AreEqual(1, FBackupCount, 'Should complete one backup');
+  FBackupService.Backup;
+  Assert.AreEqual(1, FBackupCount, 'Should complete one backup');
 
-    // Add another note
-    Note := TNote.Create;
+  Note := TNote.Create;
+  try
+    Note.ID := 2;
     Note.Title := 'Second Note';
     Note.Content := 'Different content';
     FNoteManager.AddNote(Note);
-
-    Assert.AreEqual(2, FNoteManager.NoteCount, 'Should have two notes before restore');
-
-    // Restore (which should create pre-restore backup)
-    BackupFile := FBackupService.GetBackupFileName;
-    FBackupService.Restore(BackupFile);
-
-    // Check that a pre-restore backup was created
-    PreRestoreFiles := TDirectory.GetFiles(FBackupPath, 'pre_restore_backup_*.zip');
-    PreRestoreBackupExists := Length(PreRestoreFiles) > 0;
-
-    Assert.IsTrue(PreRestoreBackupExists, 'Pre-restore backup should be created');
-    Assert.AreEqual(1, FNoteManager.NoteCount, 'Should have restored notes');
   finally
-    Note.Free;
+    // Note is now owned by manager - do not free here
   end;
+
+  Assert.AreEqual(2, FNoteManager.NoteCount, 'Should have two notes before restore');
+
+  BackupFile := FBackupService.GetBackupFileName;
+  FBackupService.Restore(BackupFile);
+
+  PreRestoreFiles := TDirectory.GetFiles(FBackupPath, 'pre_restore_backup_*.zip');
+  Assert.IsTrue(Length(PreRestoreFiles) > 0, 'Pre-restore backup should be created');
+  Assert.AreEqual(1, FNoteManager.NoteCount, 'Should have restored notes');
 end;
 
 [Test]
@@ -614,7 +630,7 @@ begin
     end;
 
     // Create a note to restore on top of
-    FNoteManager.AddNote(TNote.Create('Test', 'Content', ncYellow));
+    FNoteManager.AddNote(TNote.Create(0, 'Test', 'Content', ncYellow));
     Assert.AreEqual(1, FNoteManager.NoteCount, 'Should have note before restore');
 
     // Restore (should work but have 0 notes in result)
@@ -636,13 +652,175 @@ begin
   MissingFile := TPath.Combine(FBackupPath, 'definitely_does_not_exist.zip');
 
   // Add a note to verify it's not lost on failed restore
-  FNoteManager.AddNote(TNote.Create('Existing', 'Note', ncYellow));
+  FNoteManager.AddNote(TNote.Create(0, 'Existing', 'Note', ncYellow));
 
   // Attempt restore
   FBackupService.Restore(MissingFile);
 
-  // Verify restore failed gracefully and existing note is preserved
-  Assert.AreEqual(1, FNoteManager.NoteCount, 'Existing notes should not be lost on failed restore');
+    // Verify restore failed gracefully and existing note is preserved
+    Assert.AreEqual(1, FNoteManager.NoteCount, 'Existing notes should not be lost on failed restore');
 end;
+
+procedure TBackupServiceTestFixture.TestBackupRoundTripPreservesV3Fields;
+var
+  BackupFile: string;
+  Note: TNote;
+  JsonText: string;
+  Json: System.JSON.TJSONObject;
+  TagsArray: System.JSON.TJSONArray;
+  ChecklistArray: System.JSON.TJSONArray;
+  I: Integer;
+begin
+  Note := TNote.Create;
+  try
+    Note.ID := 999;
+    Note.Title := 'Unicode: \u4E2D\u6587 \u0395\u03BB\u03BB\u03B7\u03BD\u03B9\u03BA\u03AC \uD83C\uDF0D';
+    Note.Content := 'Content with \u2022 bullets and\ttabs';
+    Note.Color := ncBlue;
+    Note.Left := 50;
+    Note.Top := 75;
+    Note.Width := 400;
+    Note.Height := 350;
+    Note.AlwaysOnTop := True;
+    Note.Collapsed := True;
+    Note.Locked := True;
+    Note.Favorite := True;
+    Note.AddTag('Work');
+    Note.AddTag('PERSONAL');
+    Note.AddTag('MixedCase');
+    Note.AddChecklistItem('First task', False);
+    Note.AddChecklistItem('Second task', True);
+    Note.AddChecklistItem('Third task', False);
+    FNoteManager.AddNote(Note);
+  finally
+    // Note is now owned by manager
+  end;
+
+  FBackupService.Backup;
+  Assert.AreEqual(1, FBackupCount);
+
+  while FNoteManager.NoteCount > 0 do
+    FNoteManager.DeleteNote(FNoteManager.Notes[0].ID);
+
+  BackupFile := FBackupService.GetBackupFileName;
+  FBackupService.Restore(BackupFile);
+  Assert.AreEqual(1, FRestoreCount);
+
+  Assert.AreEqual(1, FNoteManager.NoteCount, 'Should have exactly one restored note');
+  Note := FNoteManager.Notes[0];
+
+  Assert.AreEqual('Unicode: \u4E2D\u6587 \u0395\u03BB\u03BB\u03B7\u03BD\u03B9\u03BA\u03AC \uD83C\uDF0D', Note.Title);
+  Assert.AreEqual('Content with \u2022 bullets and\ttabs', Note.Content);
+  Assert.AreEqual(ncBlue, Note.Color);
+  Assert.AreEqual(50, Note.Left);
+  Assert.AreEqual(75, Note.Top);
+  Assert.AreEqual(400, Note.Width);
+  Assert.AreEqual(350, Note.Height);
+  Assert.IsTrue(Note.AlwaysOnTop);
+  Assert.IsTrue(Note.Collapsed);
+  Assert.IsTrue(Note.Locked);
+  Assert.IsTrue(Note.Favorite);
+
+  Assert.AreEqual(3, Length(Note.Tags));
+  Assert.IsTrue(Note.HasTag('Work'));
+  Assert.IsTrue(Note.HasTag('PERSONAL'));
+  Assert.IsTrue(Note.HasTag('MixedCase'));
+
+  Assert.AreEqual(3, Length(Note.ChecklistItems));
+  Assert.AreEqual('First task', Note.ChecklistItems[0].Text);
+  Assert.IsFalse(Note.ChecklistItems[0].Done);
+  Assert.AreEqual('Second task', Note.ChecklistItems[1].Text);
+  Assert.IsTrue(Note.ChecklistItems[1].Done);
+  Assert.AreEqual('Third task', Note.ChecklistItems[2].Text);
+  Assert.IsFalse(Note.ChecklistItems[2].Done);
+end;
+
+procedure TBackupServiceTestFixture.TestRestoreLegacy13FieldBackupDefaultsNewFields;
+var
+  BackupFile: string;
+  Zip: TZipFile;
+  TempDir: string;
+  LegacyNoteFile: string;
+  Note: TNote;
+begin
+  TempDir := TPath.Combine(TPath.GetTempPath, 'LegacyRestoreTest_' + IntToStr(TThread.GetTickCount));
+  try
+    ForceDirectories(TempDir);
+    ForceDirectories(TPath.Combine(TempDir, 'notes'));
+
+    LegacyNoteFile := TPath.Combine(TempDir, 'notes', '0000000001.json');
+    TFile.WriteAllText(LegacyNoteFile,
+      '{"ID":1,"Title":"Legacy Note","Content":"Old format",' +
+      '"Color":2,"Left":150,"Top":200,"Width":320,"Height":280,' +
+      '"AlwaysOnTop":true,"Collapsed":false,"Locked":true,' +
+      '"CreatedAt":"2024-01-15T10:30:00","UpdatedAt":"2024-01-16T11:45:00"}',
+      TEncoding.UTF8);
+
+    BackupFile := TPath.Combine(FBackupPath, 'legacy_backup.zip');
+    Zip := TZipFile.Create;
+    try
+      Zip.Open(BackupFile, zmWrite);
+      try
+        Zip.Add(LegacyNoteFile, 'notes/0000000001.json');
+      finally
+        Zip.Close;
+      end;
+    finally
+      Zip.Free;
+    end;
+
+    FBackupService.Restore(BackupFile);
+    Assert.AreEqual(1, FRestoreCount);
+
+    Assert.AreEqual(1, FNoteManager.NoteCount, 'Should restore the legacy note');
+    Note := FNoteManager.Notes[0];
+
+    Assert.AreEqual('Legacy Note', Note.Title);
+    Assert.AreEqual('Old format', Note.Content);
+    Assert.AreEqual(ncBlue, Note.Color);
+    Assert.AreEqual(150, Note.Left);
+    Assert.AreEqual(200, Note.Top);
+    Assert.AreEqual(320, Note.Width);
+    Assert.AreEqual(280, Note.Height);
+    Assert.IsTrue(Note.AlwaysOnTop);
+    Assert.IsFalse(Note.Collapsed);
+    Assert.IsTrue(Note.Locked);
+
+    Assert.IsFalse(Note.Favorite, 'Legacy note without Favorite field should default to False');
+    Assert.AreEqual(0, Length(Note.Tags), 'Legacy note without tags field should have empty tags');
+    Assert.AreEqual(0, Length(Note.ChecklistItems), 'Legacy note without checklistItems should have empty');
+  finally
+    if TDirectory.Exists(TempDir) then
+      TDirectory.Delete(TempDir, True);
+  end;
+end;
+
+procedure TBackupServiceTestFixture.TestOnNoteDeletedFiresWhileNoteAlive;
+var
+  Note: TNote;
+begin
+  FNoteManager.OnNoteDeleted := HandleNoteDeletedForSurvivalTest;
+
+  Note := TNote.Create;
+  try
+    Note.Title := 'ToBeDeleted';
+    FNoteManager.AddNote(Note);
+  finally
+    // Note is owned by manager
+  end;
+
+  Assert.AreEqual(1, FNoteManager.NoteCount);
+
+  FDeletedNoteWasAlive := False;
+  FDeletedNoteTitle := '';
+  FNoteManager.DeleteNote(Note.ID);
+
+  Assert.IsTrue(FDeletedNoteWasAlive, 'OnNoteDeleted should fire while note is still alive');
+  Assert.AreEqual('ToBeDeleted', FDeletedNoteTitle, 'OnNoteDeleted should receive correct note data');
+  Assert.AreEqual(0, FNoteManager.NoteCount, 'Note should be removed from manager');
+end;
+
+initialization
+  TDUnitX.RegisterTestFixture(TBackupServiceTestFixture);
 
 end.

@@ -134,9 +134,9 @@ begin
   
   if FStorage.DeleteNote(ANoteID) then
   begin
-    FNotes.Delete(Index);
     if Assigned(FOnNoteDeleted) then
       FOnNoteDeleted(Note);
+    FNotes.Delete(Index);
     Result := True;
   end;
 end;

@@ -16,6 +16,7 @@ uses
   TNoteQueryTests in 'Models\TNoteQueryTests.pas',
   TSingleInstanceTests in 'Models\TSingleInstanceTests.pas',
   TBackupSchedulerTests in 'Models\TBackupSchedulerTests.pas',
+  TBackupServiceTests in 'Models\TBackupServiceTests.pas',
   TMonitorUtilsTests in 'Models\TMonitorUtilsTests.pas';
 
 var

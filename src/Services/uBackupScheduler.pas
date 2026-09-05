@@ -97,9 +97,16 @@ begin
 end;
 
 procedure TBackupScheduler.ApplyInterval;
+const
+  MAX_TIMER_INTERVAL = High(Integer);
+var
+  Computed: Int64;
 begin
   FTimer.Enabled := False;
-  FTimer.Interval := ComputeIntervalMs;
+  Computed := ComputeIntervalMs;
+  if Computed > MAX_TIMER_INTERVAL then
+    Computed := MAX_TIMER_INTERVAL;
+  FTimer.Interval := Computed;
 end;
 
 procedure TBackupScheduler.OnTimer(Sender: TObject);

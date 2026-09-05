@@ -46,6 +46,8 @@ type
     procedure TestTickNowInvokesBackupWhenEnabled;
     [Test]
     procedure TestBackupRetentionCleanup;
+    [Test]
+    procedure TestLargeIntervalClamping;
   end;
 
 implementation
@@ -175,28 +177,31 @@ var
   OldFile: string;
   RecentFile: string;
 begin
-  // Create old backup (more than retention days old)
   OldFile := TPath.Combine(FBackupPath, 'StickyNotes_Backup_20230101_120000.zip');
   TFile.WriteAllText(OldFile, 'old backup content');
   TFile.SetLastWriteTime(OldFile, Now - 10);
 
-  // Create recent backup (less than retention days old)
   RecentFile := TPath.Combine(FBackupPath, 'StickyNotes_Backup_20240101_120000.zip');
   TFile.WriteAllText(RecentFile, 'recent backup content');
   TFile.SetLastWriteTime(RecentFile, Now - 1);
 
-  // Set retention to 7 days
   FSettings.BackupRetentionDays := 7;
 
-  // Trigger backup which should also run cleanup
   FBackupService.Backup;
   Assert.AreEqual(1, FBackupCount, 'Should complete one backup');
 
-  // Verify old file was deleted
   Assert.IsFalse(TFile.Exists(OldFile), 'Old backup should be deleted');
-
-  // Verify recent file was preserved
   Assert.IsTrue(TFile.Exists(RecentFile), 'Recent backup should be preserved');
+end;
+
+procedure TBackupSchedulerTestFixture.TestLargeIntervalClamping;
+begin
+  FSettings.BackupIntervalDays := 100000;
+  FScheduler.Refresh;
+  Assert.IsTrue(FScheduler.IsRunning,
+    'Scheduler should start even with very large interval (clamped internally)');
+  Assert.AreEqual(100000, FScheduler.IntervalDays,
+    'IntervalDays setting should be preserved as-is');
 end;
 
 initialization
