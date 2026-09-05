@@ -161,6 +161,7 @@ procedure TNoteForm.FormCreate(Sender: TObject);
 begin
   TWindowUtils.EnableBorderlessWindow(Self);
   SetWindowLong(Handle, GWL_STYLE, GetWindowLong(Handle, GWL_STYLE) or WS_THICKFRAME);
+  SetWindowPos(Handle, 0, 0, 0, 0, 0, SWP_NOMOVE or SWP_NOSIZE or SWP_NOZORDER or SWP_FRAMECHANGED);
   DoubleBuffered := True;
 
   // Header panel setup
