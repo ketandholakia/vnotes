@@ -18,6 +18,7 @@ type
     btnFavorite: TButton;
     btnCollapse: TButton;
     btnLock: TButton;
+    edTitle: TEdit;
     mmContent: TMemo;
     pnlChecklist: TPanel;
     pnlChecklistItems: TPanel;
@@ -61,6 +62,7 @@ type
     procedure btnLockClick(Sender: TObject);
     procedure mmContentChange(Sender: TObject);
     procedure mmContentKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
+    procedure edTitleChange(Sender: TObject);
     procedure btnAddTagClick(Sender: TObject);
     procedure edNewTagKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
     procedure btnAddChecklistClick(Sender: TObject);
@@ -183,6 +185,15 @@ begin
   btnLock.Height := 28;
   btnLock.Caption := '🔓';
 
+  // Title editor
+  edTitle.Align := alTop;
+  edTitle.Height := 24;
+  edTitle.BorderStyle := bsNone;
+  edTitle.Font.Name := 'Segoe UI';
+  edTitle.Font.Size := 11;
+  edTitle.Font.Style := [fsBold];
+  edTitle.ParentFont := False;
+
   // Content memo
   mmContent.Align := alClient;
   mmContent.BorderStyle := bsNone;
@@ -283,13 +294,15 @@ end;
 
 procedure TNoteForm.LoadNote;
 begin
-  Caption := FNote.Title;
+  edTitle.Text := FNote.Title;
   mmContent.Text := FNote.Content;
   Left := FNote.Left;
   Top := FNote.Top;
   Width := FNote.Width;
   Height := FNote.Height;
   ApplyColor;
+  mmContent.ReadOnly := FNote.Locked;
+  edTitle.ReadOnly := FNote.Locked;
   UpdateUI;
 
   // Phase 6A Part 2: Load tags and checklist
@@ -301,7 +314,7 @@ procedure TNoteForm.SaveNote;
 begin
   if FNote.Locked then Exit;
 
-  FNote.Title := Caption;
+  FNote.Title := edTitle.Text;
   FNote.Content := mmContent.Text;
   FNote.Left := Left;
   FNote.Top := Top;
@@ -328,6 +341,8 @@ begin
   pnlHeader.Color := TColorUtils.DarkenColor(C, 20);
   mmContent.Color := C;
   mmContent.Font.Color := FEditorContext.GetNoteTextColor(FNote.Color);
+  edTitle.Color := C;
+  edTitle.Font.Color := mmContent.Font.Color;
 
   btnClose.Font.Color := mmContent.Font.Color;
   btnColor.Font.Color := mmContent.Font.Color;
@@ -430,12 +445,14 @@ begin
   begin
     Height := FCollapsedHeight;
     mmContent.Visible := False;
+    edTitle.Visible := False;
     btnCollapse.Caption := '▣';
   end
   else
   begin
     Height := FNote.Height;
     mmContent.Visible := True;
+    edTitle.Visible := True;
     btnCollapse.Caption := '□';
   end;
   SaveNote;
@@ -446,11 +463,18 @@ procedure TNoteForm.btnLockClick(Sender: TObject);
 begin
   FNote.Locked := not FNote.Locked;
   mmContent.ReadOnly := FNote.Locked;
+  edTitle.ReadOnly := FNote.Locked;
   SaveNote;
   UpdateUI;
 end;
 
 procedure TNoteForm.mmContentChange(Sender: TObject);
+begin
+  if not FNote.Locked then
+    FEditorContext.ScheduleSave(FNote);
+end;
+
+procedure TNoteForm.edTitleChange(Sender: TObject);
 begin
   if not FNote.Locked then
     FEditorContext.ScheduleSave(FNote);

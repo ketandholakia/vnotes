@@ -96,11 +96,27 @@ object NoteForm: TNoteForm
       OnClick = btnFavoriteClick
     end
   end
-  object mmContent: TMemo
+  object edTitle: TEdit
     Left = 0
     Top = 32
     Width = 300
-    Height = 194
+    Height = 24
+    Align = alTop
+    BorderStyle = bsNone
+    Font.Charset = DEFAULT_CHARSET
+    Font.Color = clWindowText
+    Font.Height = -13
+    Font.Name = 'Segoe UI'
+    Font.Style = [fsBold]
+    ParentFont = False
+    TabOrder = 1
+    OnChange = edTitleChange
+  end
+  object mmContent: TMemo
+    Left = 0
+    Top = 56
+    Width = 300
+    Height = 170
     StyleElements = [seBorder]
     Align = alClient
     BorderStyle = bsNone
@@ -111,20 +127,20 @@ object NoteForm: TNoteForm
     Font.Style = []
     ParentFont = False
     ScrollBars = ssVertical
-    TabOrder = 1
+    TabOrder = 2
     OnChange = mmContentChange
     OnKeyDown = mmContentKeyDown
   end
   object pnlChecklist: TPanel
     Left = 0
-    Top = 32
+    Top = 56
     Width = 300
-    Height = 194
+    Height = 170
     Align = alClient
     BevelOuter = bvNone
     BorderWidth = 4
     ParentBackground = False
-    TabOrder = 2
+    TabOrder = 3
     Visible = False
     object pnlChecklistItems: TPanel
       Left = 4
@@ -169,13 +185,13 @@ object NoteForm: TNoteForm
   end
   object pnlTagsFooter: TPanel
     Left = 0
-    Top = 226
+    Top = 250
     Width = 300
     Height = 24
     Align = alBottom
     BevelOuter = bvNone
     ParentBackground = False
-    TabOrder = 3
+    TabOrder = 4
     object flwTags: TFlowPanel
       Left = 1
       Top = 1
