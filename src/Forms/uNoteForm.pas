@@ -790,7 +790,10 @@ begin
     pnlItem.BevelOuter := bvNone;
     pnlItem.Caption := '';
     pnlItem.Height := 24;
-    pnlItem.Tag := I; // Store the item index for modification
+    pnlItem.Tag := I;
+    pnlItem.Top := I * 24;
+    pnlItem.Left := 0;
+    pnlItem.Width := pnlChecklistItems.ClientWidth;
 
     chkDone := TCheckBox.Create(Self);
     chkDone.Parent := pnlItem;
