@@ -99,6 +99,7 @@ type
     procedure UpdateFavoriteButton;
     procedure ApplyTheme;
     procedure WMNCHitTest(var Message: TWMNCHitTest); message WM_NCHITTEST;
+    procedure WMNCLButtonDown(var Message: TWMNCLButtonDown); message WM_NCLBUTTONDOWN;
     procedure WMGetMinMaxInfo(var Message: TWMGetMinMaxInfo); message WM_GETMINMAXINFO;
     // Phase 6A Part 2: tag chip strip + checklist panel.
     procedure RefreshTagsFooter;
@@ -161,6 +162,7 @@ procedure TNoteForm.FormCreate(Sender: TObject);
 begin
   TWindowUtils.EnableBorderlessWindow(Self);
   SetWindowLong(Handle, GWL_STYLE, GetWindowLong(Handle, GWL_STYLE) or WS_THICKFRAME);
+  SetWindowLong(Handle, GWL_EXSTYLE, GetWindowLong(Handle, GWL_EXSTYLE) or WS_EX_WINDOWEDGE);
   SetWindowPos(Handle, 0, 0, 0, 0, 0, SWP_NOMOVE or SWP_NOSIZE or SWP_NOZORDER or SWP_FRAMECHANGED);
   DoubleBuffered := True;
 
@@ -645,6 +647,21 @@ end;
 procedure TNoteForm.WMNCHitTest(var Message: TWMNCHitTest);
 begin
   TWindowUtils.HandleNCHitTest(Self, Message);
+end;
+
+procedure TNoteForm.WMNCLButtonDown(var Message: TWMNCLButtonDown);
+var
+  HitTest: Integer;
+begin
+  HitTest := Message.HitTest;
+  if (HitTest in [HTLEFT, HTRIGHT, HTTOP, HTBOTTOM,
+                  HTTOPLEFT, HTTOPRIGHT, HTBOTTOMLEFT, HTBOTTOMRIGHT]) then
+  begin
+    DefWindowProc(Handle, WM_SYSCOMMAND, SC_SIZE + HitTest, 0);
+    Message.Result := 0;
+    Exit;
+  end;
+  inherited;
 end;
 
 procedure TNoteForm.WMGetMinMaxInfo(var Message: TWMGetMinMaxInfo);
