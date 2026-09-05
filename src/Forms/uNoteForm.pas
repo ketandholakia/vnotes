@@ -476,8 +476,11 @@ end;
 
 procedure TNoteForm.edTitleChange(Sender: TObject);
 begin
-  if not FNote.Locked then
-    FEditorContext.ScheduleSave(FNote);
+  if FNote.Locked then
+    Exit;
+
+  FNote.Title := edTitle.Text;
+  FEditorContext.ScheduleSave(FNote);
 end;
 
 procedure TNoteForm.mmContentKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
