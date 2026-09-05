@@ -21,7 +21,10 @@ type
       // v1 = adds the schemaVersion field itself; no tags/checklistItems.
       // v2 = adds "tags" (string array) and "checklistItems" (array of
       //      {text, done}). Absent on v0/v1 files -> read as empty arrays.
-      CURRENT_SCHEMA_VERSION = 2;
+      // v3 = adds "favorite" (boolean). Absent on v0/v1/v2 files, or
+      //      wrong-typed, -> read as False (same tolerant policy as the
+      //      other boolean flags).
+      CURRENT_SCHEMA_VERSION = 3;
       // Unversioned (pre-versioning) files are interpreted as schema 0.
       LEGACY_SCHEMA_VERSION = 0;
       SCHEMA_VERSION_FIELD = 'schemaVersion';
@@ -136,6 +139,7 @@ begin
   Result.AddPair('AlwaysOnTop', TJSONBool.Create(ANote.AlwaysOnTop));
   Result.AddPair('Collapsed', TJSONBool.Create(ANote.Collapsed));
   Result.AddPair('Locked', TJSONBool.Create(ANote.Locked));
+  Result.AddPair('Favorite', TJSONBool.Create(ANote.Favorite));
   Result.AddPair('CreatedAt', TJSONString.Create(DateTimeToISO8601(ANote.CreatedAt)));
   Result.AddPair('UpdatedAt', TJSONString.Create(DateTimeToISO8601(ANote.UpdatedAt)));
 
@@ -252,7 +256,8 @@ begin
   // Missing schemaVersion       -> legacy (unversioned) format, treated as v0
   //                                and read with the legacy field mapping below.
   // schemaVersion = 1           -> v1: no tags/checklistItems, both default empty.
-  // schemaVersion = 2 (current) -> adds tags/checklistItems.
+  // schemaVersion = 2           -> v2: adds tags/checklistItems; no favorite.
+  // schemaVersion = 3 (current) -> v3: adds favorite (absent -> False).
   // schemaVersion < 0           -> invalid, reject.
   // schemaVersion > current     -> future format, reject safely (never touched).
   // wrong JSON type             -> invalid metadata, reject safely.
@@ -352,6 +357,16 @@ begin
       Note.Locked := False
     else
       Note.Locked := False;
+
+    // Absent on v0/v1/v2 files (and wrong-typed anywhere) -> False,
+    // same tolerant policy as the other boolean flags above.
+    Val := AJson.GetValue('Favorite');
+    if (Val <> nil) and (Val is TJSONTrue) then
+      Note.Favorite := True
+    else if (Val <> nil) and (Val is TJSONFalse) then
+      Note.Favorite := False
+    else
+      Note.Favorite := False;
 
     Val := AJson.GetValue('CreatedAt');
     CreatedStr := '';

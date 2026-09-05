@@ -90,6 +90,13 @@ type
     procedure TestFilterByTagMultipleMatchingNotes;
     [Test]
     procedure TestFilterByTagNonOwning;
+    // Phase 6C.1: Favorite-first ordering
+    [Test]
+    procedure TestSearchFavoriteFirstOrdering;
+    [Test]
+    procedure TestSearchFavoriteTieBreakByIDDesc;
+    [Test]
+    procedure TestFilterByTagPreservesFavoriteFirst;
   end;
 
 implementation
@@ -875,6 +882,89 @@ begin
   // Source note must survive result-list disposal.
   Assert.AreEqual(1, FSource.Count, 'Source notes must survive');
   Assert.AreEqual('Keep Me', FSource[0].Title);
+end;
+
+// Phase 6C.1: Favorite-first ordering
+
+procedure TNoteQueryTestFixture.TestSearchFavoriteFirstOrdering;
+var
+  Results: TObjectList<TNote>;
+begin
+  FSource.Add(TNote.Create(1, 'N1', 'x', ncYellow));
+  FSource.Add(TNote.Create(2, 'N2', 'x', ncGreen));
+  FSource.Add(TNote.Create(3, 'N3', 'x', ncBlue));
+  FSource.Add(TNote.Create(4, 'N4', 'x', ncYellow));
+  FSource[2].ToggleFavorite;
+  FSource[3].ToggleFavorite;
+  FSource[0].UpdatedAt := Stamp(300);  // plain, newest
+  FSource[1].UpdatedAt := Stamp(100);  // plain, oldest
+  FSource[2].UpdatedAt := Stamp(100);  // favorite, oldest
+  FSource[3].UpdatedAt := Stamp(300);  // favorite, newest
+
+  Results := FQuery.Search('x', FSource);
+  try
+    Assert.AreEqual(4, Results.Count);
+    // Favorites first (UpdatedAt DESC within group), then the rest.
+    Assert.AreEqual<Int64>(4, Results[0].ID);
+    Assert.AreEqual<Int64>(3, Results[1].ID);
+    Assert.AreEqual<Int64>(1, Results[2].ID);
+    Assert.AreEqual<Int64>(2, Results[3].ID);
+  finally
+    Results.Free;
+  end;
+end;
+
+procedure TNoteQueryTestFixture.TestSearchFavoriteTieBreakByIDDesc;
+var
+  Results: TObjectList<TNote>;
+begin
+  FSource.Add(TNote.Create(5, 'N5', 'x', ncYellow));
+  FSource.Add(TNote.Create(7, 'N7', 'x', ncGreen));
+  FSource.Add(TNote.Create(6, 'N6', 'x', ncBlue));
+  FSource[0].ToggleFavorite;
+  FSource[2].ToggleFavorite;
+  FSource[0].UpdatedAt := Stamp(150);
+  FSource[1].UpdatedAt := Stamp(150);
+  FSource[2].UpdatedAt := Stamp(150);  // identical timestamps throughout
+
+  Results := FQuery.Search('x', FSource);
+  try
+    Assert.AreEqual(3, Results.Count);
+    // Favorite group first with ID DESC, then the non-favorite note.
+    Assert.AreEqual<Int64>(6, Results[0].ID);
+    Assert.AreEqual<Int64>(5, Results[1].ID);
+    Assert.AreEqual<Int64>(7, Results[2].ID);
+  finally
+    Results.Free;
+  end;
+end;
+
+procedure TNoteQueryTestFixture.TestFilterByTagPreservesFavoriteFirst;
+var
+  Results: TObjectList<TNote>;
+begin
+  FSource.Add(TNote.Create(1, 'N1', '', ncYellow));
+  FSource.Add(TNote.Create(2, 'N2', '', ncGreen));
+  FSource.Add(TNote.Create(3, 'N3', '', ncBlue));
+  FSource[0].AddTag('work');
+  FSource[1].AddTag('work');
+  FSource[2].AddTag('work');
+  FSource[1].ToggleFavorite;
+  FSource[0].UpdatedAt := Stamp(300);  // plain, newest
+  FSource[1].UpdatedAt := Stamp(100);  // favorite, oldest
+  FSource[2].UpdatedAt := Stamp(200);  // plain, middle
+
+  Results := FQuery.FilterByTag('work', FSource);
+  try
+    Assert.AreEqual(3, Results.Count);
+    // Same Favorite-first contract as Search: the older favorite outranks
+    // newer plain notes; recency still holds within the plain group.
+    Assert.AreEqual<Int64>(2, Results[0].ID);
+    Assert.AreEqual<Int64>(1, Results[1].ID);
+    Assert.AreEqual<Int64>(3, Results[2].ID);
+  finally
+    Results.Free;
+  end;
 end;
 
 initialization

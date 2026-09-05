@@ -30,6 +30,7 @@ type
     FAlwaysOnTop: Boolean;
     FCollapsed: Boolean;
     FLocked: Boolean;
+    FFavorite: Boolean;
     FCreatedAt: TDateTime;
     FUpdatedAt: TDateTime;
     FTags: TArray<string>;
@@ -57,6 +58,10 @@ type
     property AlwaysOnTop: Boolean read FAlwaysOnTop write FAlwaysOnTop;
     property Collapsed: Boolean read FCollapsed write FCollapsed;
     property Locked: Boolean read FLocked write FLocked;
+    // Phase 6C.1: starred/favorite marker. Plain flag like AlwaysOnTop:
+    // default False, direct property write, no Touch (UpdatedAt keeps
+    // meaning "last persisted change" via TNoteManager.SaveNote).
+    property Favorite: Boolean read FFavorite write FFavorite;
     property CreatedAt: TDateTime read FCreatedAt write FCreatedAt;
     property UpdatedAt: TDateTime read FUpdatedAt write FUpdatedAt;
     property Tags: TArray<string> read GetTags write SetTags;
@@ -79,6 +84,9 @@ type
     // state - computed on demand from FChecklistItems. Empty checklist => 0/0.
     function ChecklistDoneCount: Integer;
     function ChecklistTotalCount: Integer;
+    // Phase 6C.1: flips Favorite. Like ToggleChecklistItem: no Touch, no
+    // autosave - the caller persists through the existing save path.
+    procedure ToggleFavorite;
   end;
 
   TNoteList = TObjectList<TNote>;
@@ -109,6 +117,7 @@ begin
   FAlwaysOnTop := False;
   FCollapsed := False;
   FLocked := False;
+  FFavorite := False;
   FCreatedAt := Now;
   FUpdatedAt := Now;
   FTags := nil;
@@ -138,6 +147,7 @@ begin
   FAlwaysOnTop := Source.FAlwaysOnTop;
   FCollapsed := Source.FCollapsed;
   FLocked := Source.FLocked;
+  FFavorite := Source.FFavorite;
   FCreatedAt := Source.FCreatedAt;
   FUpdatedAt := Source.FUpdatedAt;
   // Explicit Copy: dynamic-array assignment shares the underlying buffer,
@@ -298,6 +308,11 @@ end;
 function TNote.ChecklistTotalCount: Integer;
 begin
   Result := Length(FChecklistItems);
+end;
+
+procedure TNote.ToggleFavorite;
+begin
+  FFavorite := not FFavorite;
 end;
 
 end.

@@ -39,6 +39,15 @@ type
     procedure TestLoadLegacyAndV1NotesDefaultToEmptyTagsAndChecklist;
     [Test]
     procedure TestLoadMalformedTagsAndChecklistDegradesGracefully;
+    // Phase 6C.1: Favorite flag persistence.
+    [Test]
+    procedure TestSaveLoadNoteWithFavoriteRoundTrips;
+    [Test]
+    procedure TestLoadLegacyV0V1V2NotesDefaultFavoriteFalse;
+    [Test]
+    procedure TestLoadV3NoteWithoutFavoriteDefaultsFalse;
+    [Test]
+    procedure TestLoadMalformedFavoriteDegradesGracefully;
   end;
 
 implementation
@@ -367,8 +376,8 @@ begin
         Pair := (Json as TJSONObject).Get('schemaVersion');
         Assert.IsNotNull(Pair, 'Saved JSON must contain schemaVersion');
         Assert.IsTrue(Pair.JsonValue is TJSONNumber, 'schemaVersion must be a JSON number');
-        Assert.AreEqual<Int64>(2, (Pair.JsonValue as TJSONNumber).AsInt64,
-          'schemaVersion must equal the current schema version (2)');
+Assert.AreEqual<Int64>(3, (Pair.JsonValue as TJSONNumber).AsInt64,
+'schemaVersion must equal the current schema version (3)');
       finally
         Json.Free;
       end;
@@ -723,6 +732,201 @@ begin
       Assert.AreEqual('', LoadedNotes[0].ChecklistItems[0].Text);
       Assert.IsTrue(LoadedNotes[0].ChecklistItems[0].Done);
       Assert.AreEqual('Valid', LoadedNotes[0].ChecklistItems[1].Text);
+    finally
+      LoadedNotes.Free;
+    end;
+  finally
+    Storage.Free;
+    if TDirectory.Exists(TempDir) then
+      TDirectory.Delete(TempDir, True);
+  end;
+end;
+
+// Phase 6C.1: Favorite flag persistence
+
+procedure TJsonStorageTestFixture.TestSaveLoadNoteWithFavoriteRoundTrips;
+var
+  Storage: TJsonStorage;
+  Note: TNote;
+  TempDir: string;
+  LoadedNotes: TObjectList<TNote>;
+  FavNote, PlainNote: TNote;
+  N: TNote;
+begin
+  TempDir := TPath.GetTempPath + 'StickyNotes_FavoriteRoundTripTest_';
+  if TDirectory.Exists(TempDir) then
+    TDirectory.Delete(TempDir, True);
+
+  Storage := TJsonStorage.Create(TempDir);
+  try
+    Note := TNote.Create(20, 'Starred', 'Important', ncYellow);
+    try
+      Note.ToggleFavorite;
+      Assert.IsTrue(Storage.SaveNote(Note), 'SaveNote should succeed');
+    finally
+      Note.Free;
+    end;
+    Note := TNote.Create(21, 'Ordinary', 'Routine', ncGreen);
+    try
+      Assert.IsTrue(Storage.SaveNote(Note), 'SaveNote should succeed');
+    finally
+      Note.Free;
+    end;
+
+    LoadedNotes := Storage.LoadAllNotes;
+    try
+      Assert.AreEqual<Integer>(2, LoadedNotes.Count);
+      FavNote := nil;
+      PlainNote := nil;
+      for N in LoadedNotes do
+      begin
+        if N.ID = 20 then FavNote := N
+        else if N.ID = 21 then PlainNote := N;
+      end;
+      Assert.IsNotNull(FavNote, 'Favorite note should load');
+      Assert.IsTrue(FavNote.Favorite, 'Favorite=True must round-trip');
+      Assert.IsNotNull(PlainNote, 'Plain note should load');
+      Assert.IsFalse(PlainNote.Favorite, 'Favorite=False must round-trip');
+    finally
+      LoadedNotes.Free;
+    end;
+  finally
+    Storage.Free;
+    if TDirectory.Exists(TempDir) then
+      TDirectory.Delete(TempDir, True);
+  end;
+end;
+
+procedure TJsonStorageTestFixture.TestLoadLegacyV0V1V2NotesDefaultFavoriteFalse;
+var
+  Storage: TJsonStorage;
+  NotesDir, TempDir: string;
+  LoadedNotes: TObjectList<TNote>;
+  N: TNote;
+  AllDefault: Boolean;
+begin
+  TempDir := TPath.GetTempPath + 'StickyNotes_FavoriteLegacyDefaultTest_';
+  if TDirectory.Exists(TempDir) then
+    TDirectory.Delete(TempDir, True);
+
+  Storage := TJsonStorage.Create(TempDir);
+  try
+    NotesDir := TPath.Combine(TempDir, 'notes');
+    TDirectory.CreateDirectory(NotesDir);
+
+    // v0 (unversioned): predates schemaVersion entirely.
+    TFile.WriteAllText(TPath.Combine(NotesDir, '0000000030.json'),
+      '{"ID":30,"Title":"Legacy","Content":"No schemaVersion","Color":0,' +
+      '"Left":100,"Top":100,"Width":300,"Height":250,"AlwaysOnTop":false,' +
+      '"Collapsed":false,"Locked":false,"CreatedAt":"2024-01-01T00:00:00",' +
+      '"UpdatedAt":"2024-01-01T00:00:00"}', TEncoding.UTF8);
+    // v1: has schemaVersion, predates tags/checklistItems/favorite.
+    TFile.WriteAllText(TPath.Combine(NotesDir, '0000000031.json'),
+      '{"schemaVersion":1,"ID":31,"Title":"V1","Content":"Old","Color":0,' +
+      '"Left":100,"Top":100,"Width":300,"Height":250,"AlwaysOnTop":false,' +
+      '"Collapsed":false,"Locked":false,"CreatedAt":"2024-01-01T00:00:00",' +
+      '"UpdatedAt":"2024-01-01T00:00:00"}', TEncoding.UTF8);
+    // v2: has tags/checklistItems, predates favorite.
+    TFile.WriteAllText(TPath.Combine(NotesDir, '0000000032.json'),
+      '{"schemaVersion":2,"ID":32,"Title":"V2","Content":"Older","Color":0,' +
+      '"Left":100,"Top":100,"Width":300,"Height":250,"AlwaysOnTop":false,' +
+      '"Collapsed":false,"Locked":false,"CreatedAt":"2024-01-01T00:00:00",' +
+      '"UpdatedAt":"2024-01-01T00:00:00","tags":["work"],"checklistItems":[]}',
+      TEncoding.UTF8);
+
+    LoadedNotes := Storage.LoadAllNotes;
+    try
+      Assert.AreEqual<Integer>(3, LoadedNotes.Count, 'All legacy notes should load');
+      AllDefault := True;
+      for N in LoadedNotes do
+        AllDefault := AllDefault and not N.Favorite;
+      Assert.IsTrue(AllDefault, 'v0/v1/v2 notes must default Favorite=False');
+    finally
+      LoadedNotes.Free;
+    end;
+  finally
+    Storage.Free;
+    if TDirectory.Exists(TempDir) then
+      TDirectory.Delete(TempDir, True);
+  end;
+end;
+
+procedure TJsonStorageTestFixture.TestLoadV3NoteWithoutFavoriteDefaultsFalse;
+var
+  Storage: TJsonStorage;
+  NotesDir, TempDir: string;
+  LoadedNotes: TObjectList<TNote>;
+begin
+  TempDir := TPath.GetTempPath + 'StickyNotes_FavoriteV3MissingTest_';
+  if TDirectory.Exists(TempDir) then
+    TDirectory.Delete(TempDir, True);
+
+  Storage := TJsonStorage.Create(TempDir);
+  try
+    NotesDir := TPath.Combine(TempDir, 'notes');
+    TDirectory.CreateDirectory(NotesDir);
+    // v3 file with the favorite pair deleted (e.g. hand-edited): valid v3,
+    // missing field must still default safely rather than failing the load.
+    TFile.WriteAllText(TPath.Combine(NotesDir, '0000000033.json'),
+      '{"schemaVersion":3,"ID":33,"Title":"V3NoFav","Content":"Edited","Color":0,' +
+      '"Left":100,"Top":100,"Width":300,"Height":250,"AlwaysOnTop":false,' +
+      '"Collapsed":false,"Locked":false,"CreatedAt":"2024-01-01T00:00:00",' +
+      '"UpdatedAt":"2024-01-01T00:00:00","tags":[],"checklistItems":[]}',
+      TEncoding.UTF8);
+
+    LoadedNotes := Storage.LoadAllNotes;
+    try
+      Assert.AreEqual<Integer>(1, LoadedNotes.Count, 'Note must still load');
+      Assert.IsFalse(LoadedNotes[0].Favorite, 'Missing favorite defaults to False');
+    finally
+      LoadedNotes.Free;
+    end;
+  finally
+    Storage.Free;
+    if TDirectory.Exists(TempDir) then
+      TDirectory.Delete(TempDir, True);
+  end;
+end;
+
+procedure TJsonStorageTestFixture.TestLoadMalformedFavoriteDegradesGracefully;
+var
+  Storage: TJsonStorage;
+  NotesDir, TempDir: string;
+  LoadedNotes: TObjectList<TNote>;
+  N: TNote;
+  AllDefault: Boolean;
+begin
+  TempDir := TPath.GetTempPath + 'StickyNotes_FavoriteMalformedTest_';
+  if TDirectory.Exists(TempDir) then
+    TDirectory.Delete(TempDir, True);
+
+  Storage := TJsonStorage.Create(TempDir);
+  try
+    NotesDir := TPath.Combine(TempDir, 'notes');
+    TDirectory.CreateDirectory(NotesDir);
+
+    // Wrong-typed "favorite" values must degrade to False, never fail the load.
+    TFile.WriteAllText(TPath.Combine(NotesDir, '0000000034.json'),
+      '{"schemaVersion":3,"ID":34,"Title":"StrFav","Content":"x","Color":0,' +
+      '"Left":100,"Top":100,"Width":300,"Height":250,"AlwaysOnTop":false,' +
+      '"Collapsed":false,"Locked":false,"CreatedAt":"2024-01-01T00:00:00",' +
+      '"UpdatedAt":"2024-01-01T00:00:00","tags":[],"checklistItems":[],' +
+      '"favorite":"yes"}', TEncoding.UTF8);
+    TFile.WriteAllText(TPath.Combine(NotesDir, '0000000035.json'),
+      '{"schemaVersion":3,"ID":35,"Title":"NumFav","Content":"x","Color":0,' +
+      '"Left":100,"Top":100,"Width":300,"Height":250,"AlwaysOnTop":false,' +
+      '"Collapsed":false,"Locked":false,"CreatedAt":"2024-01-01T00:00:00",' +
+      '"UpdatedAt":"2024-01-01T00:00:00","tags":[],"checklistItems":[],' +
+      '"favorite":1}', TEncoding.UTF8);
+
+    LoadedNotes := Storage.LoadAllNotes;
+    try
+      Assert.AreEqual<Integer>(2, LoadedNotes.Count,
+        'Notes must still load despite wrong-typed favorite');
+      AllDefault := True;
+      for N in LoadedNotes do
+        AllDefault := AllDefault and not N.Favorite;
+      Assert.IsTrue(AllDefault, 'Wrong-typed favorite degrades to False');
     finally
       LoadedNotes.Free;
     end;

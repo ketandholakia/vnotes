@@ -25,8 +25,9 @@ type
     {
       Returns notes matching AQuery, case-insensitive substring across Title
       and Content. Empty/blank query returns ALL notes.
-      Results are deterministic: sorted by UpdatedAt descending (most recently
-      modified first), tie-broken by ID descending.
+      Results are deterministic: Favorite notes first, then sorted by
+      UpdatedAt descending (most recently modified first), tie-broken by
+      ID descending.
       Result list has OwnsObjects := False - see ownership contract above.
     }
     function Search(const AQuery: string;
@@ -43,7 +44,8 @@ type
       Phase 6B.1: returns notes whose tag set contains ATag (trimmed,
       case-insensitive, exact match - NOT substring). An empty/whitespace
       tag returns an empty result list. Ordering and ownership contract
-      identical to Search: UpdatedAt DESC, ID DESC; OwnsObjects = False.
+      identical to Search: Favorite first, then UpdatedAt DESC, ID DESC;
+      OwnsObjects = False.
     }
     function FilterByTag(const ATag: string;
       const ANotes: TObjectList<TNote>): TObjectList<TNote>;
@@ -63,6 +65,8 @@ type
   private
     // Phase 6B.1: shared deterministic comparer (UpdatedAt DESC, ID DESC)
     // used by both Search and FilterByTag.
+    // Phase 6C.1: Favorite notes sort first; legacy recency order holds
+    // within each group.
     class function CompareForRecency(const L, R: TNote): Integer; static;
     // Shared result construction: non-owning reference list.
     class function NewResultList: TObjectList<TNote>; static;
@@ -92,7 +96,8 @@ begin
       Result.Add(Note);
   end;
 
-  // Deterministic order: most recently modified first, ID desc as tie-break.
+  // Deterministic order: favorites first, most recently modified first,
+  // ID desc as tie-break.
   Result.Sort(TComparer<TNote>.Construct(CompareForRecency));
 end;
 
@@ -151,13 +156,21 @@ begin
     if Note.HasTag(Wanted) then
       Result.Add(Note);
 
-  // Same deterministic order as Search: UpdatedAt DESC, ID DESC.
+  // Same deterministic order as Search: favorites first, UpdatedAt DESC,
+  // ID DESC.
   Result.Sort(TComparer<TNote>.Construct(CompareForRecency));
 end;
 
 class function TNoteQuery.CompareForRecency(const L, R: TNote): Integer;
 begin
-  if L.UpdatedAt > R.UpdatedAt then
+  // Phase 6C.1: Favorite-first ordering. Favorites sort before non-favorites;
+  // within each group the legacy order holds (UpdatedAt DESC, ID DESC), so
+  // all-False collections order exactly as before.
+  if L.Favorite and not R.Favorite then
+    Result := -1
+  else if R.Favorite and not L.Favorite then
+    Result := 1
+  else if L.UpdatedAt > R.UpdatedAt then
     Result := -1
   else if L.UpdatedAt < R.UpdatedAt then
     Result := 1

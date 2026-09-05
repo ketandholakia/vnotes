@@ -3,7 +3,7 @@ unit TNoteTests;
 interface
 
 uses
-  System.SysUtils, System.Classes, System.JSON,
+  System.SysUtils, System.Classes, System.JSON, System.DateUtils,
   uNote, uEnums, DUnitX.TestFramework;
 
 type
@@ -41,6 +41,15 @@ type
     procedure TestChecklistProgressAllComplete;
     [Test]
     procedure TestChecklistProgressPartial;
+    // Phase 6C.1: Favorite flag.
+    [Test]
+    procedure TestFavoriteDefaultsFalse;
+    [Test]
+    procedure TestFavoriteToggle;
+    [Test]
+    procedure TestAssignAndClonePreservesFavorite;
+    [Test]
+    procedure TestIsEmptyIgnoresFavorite;
   end;
 
 implementation
@@ -417,6 +426,83 @@ begin
     Note.RemoveChecklistItem(3);
     Assert.AreEqual(2, Note.ChecklistDoneCount, 'Removing a done item lowers done count');
     Assert.AreEqual(3, Note.ChecklistTotalCount, 'Three items remain');
+  finally
+    Note.Free;
+  end;
+end;
+
+// Phase 6C.1: Favorite flag
+
+procedure TNoteTestFixture.TestFavoriteDefaultsFalse;
+var
+  Note: TNote;
+begin
+  Note := TNote.Create;
+  try
+    Assert.IsFalse(Note.Favorite, 'Default constructor leaves Favorite False');
+  finally
+    Note.Free;
+  end;
+  Note := TNote.Create(1, 'Title', 'Content', ncBlue);
+  try
+    Assert.IsFalse(Note.Favorite, 'Parameterized constructor leaves Favorite False');
+  finally
+    Note.Free;
+  end;
+end;
+
+procedure TNoteTestFixture.TestFavoriteToggle;
+var
+  Note: TNote;
+  Stamped: TDateTime;
+begin
+  Note := TNote.Create;
+  try
+    Note.ToggleFavorite;
+    Assert.IsTrue(Note.Favorite, 'First toggle sets Favorite True');
+    Note.ToggleFavorite;
+    Assert.IsFalse(Note.Favorite, 'Second toggle restores Favorite False');
+
+    // Toggling must not manipulate UpdatedAt (that stays the save path's job).
+    Stamped := EncodeDateTime(2024, 1, 1, 12, 0, 0, 0);
+    Note.UpdatedAt := Stamped;
+    Note.ToggleFavorite;
+    Assert.AreEqual(Stamped, Note.UpdatedAt, 'ToggleFavorite must not Touch');
+  finally
+    Note.Free;
+  end;
+end;
+
+procedure TNoteTestFixture.TestAssignAndClonePreservesFavorite;
+var
+  Original, Cloned: TNote;
+begin
+  Original := TNote.Create(1, 'Title', 'Content', ncYellow);
+  try
+    Original.ToggleFavorite;
+    Cloned := Original.Clone;
+    try
+      Assert.IsTrue(Cloned.Favorite, 'Clone preserves Favorite');
+      Cloned.ToggleFavorite;
+      Assert.IsFalse(Cloned.Favorite, 'Clone toggles independently');
+      Assert.IsTrue(Original.Favorite, 'Original unaffected by clone toggle');
+    finally
+      Cloned.Free;
+    end;
+  finally
+    Original.Free;
+  end;
+end;
+
+procedure TNoteTestFixture.TestIsEmptyIgnoresFavorite;
+var
+  Note: TNote;
+begin
+  Note := TNote.Create;
+  try
+    Assert.IsTrue(Note.IsEmpty);
+    Note.ToggleFavorite;
+    Assert.IsTrue(Note.IsEmpty, 'Favorite alone does not make a note non-empty');
   finally
     Note.Free;
   end;
