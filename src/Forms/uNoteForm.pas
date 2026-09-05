@@ -18,6 +18,7 @@ type
     btnFavorite: TButton;
     btnCollapse: TButton;
     btnLock: TButton;
+    btnChecklist: TButton;
     edTitle: TEdit;
     mmContent: TMemo;
     pnlChecklist: TPanel;
@@ -60,6 +61,7 @@ type
     procedure btnFavoriteClick(Sender: TObject);
     procedure btnCollapseClick(Sender: TObject);
     procedure btnLockClick(Sender: TObject);
+    procedure btnChecklistClick(Sender: TObject);
     procedure mmContentChange(Sender: TObject);
     procedure mmContentKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
     procedure edTitleChange(Sender: TObject);
@@ -89,6 +91,7 @@ type
     FCollapsedHeight: Integer;
     FIsClosing: Boolean;
     FOnClosed: TNotifyEvent;
+    FForcingChecklistMode: Boolean;
     procedure LoadNote;
     procedure SaveNote;
     procedure ApplyColor;
@@ -100,7 +103,8 @@ type
     // Phase 6A Part 2: tag chip strip + checklist panel.
     procedure RefreshTagsFooter;
     procedure RefreshChecklistPanel;
-    procedure UpdateContentMode;  // memo vs checklist panel visibility
+    procedure UpdateContentMode;
+    procedure ToggleChecklistMode;  // memo vs checklist panel visibility
     procedure HandleAddTagInput;
     procedure HandleAddChecklistInput;
     procedure ChecklistItemToggle(Sender: TObject);
@@ -150,6 +154,7 @@ begin
   FEditorContext := AContext;
   FCollapsedHeight := COLLAPSED_HEIGHT;
   FIsClosing := False;
+  FForcingChecklistMode := False;
 end;
 
 procedure TNoteForm.FormCreate(Sender: TObject);
@@ -185,6 +190,12 @@ begin
   btnLock.Height := 28;
   btnLock.Caption := '🔓';
 
+  btnChecklist.Width := 28;
+  btnChecklist.Height := 28;
+  btnChecklist.Caption := '☑';
+  btnChecklist.Hint := 'Checklist';
+  btnChecklist.ShowHint := True;
+
   // Title editor
   edTitle.Align := alTop;
   edTitle.Height := 28;
@@ -211,6 +222,8 @@ begin
   miOrange.Tag := Ord(ncOrange);
   miWhite.Tag := Ord(ncWhite);
   miGray.Tag := Ord(ncGray);
+
+  pnlChecklist.Visible := False;
 
   LoadNote;
   ApplyTheme;
@@ -466,6 +479,30 @@ begin
   edTitle.ReadOnly := FNote.Locked;
   SaveNote;
   UpdateUI;
+end;
+
+procedure TNoteForm.btnChecklistClick(Sender: TObject);
+begin
+  if FNote.Locked then
+    Exit;
+
+  ToggleChecklistMode;
+end;
+
+procedure TNoteForm.ToggleChecklistMode;
+begin
+  FForcingChecklistMode := not FForcingChecklistMode;
+
+  if FForcingChecklistMode then
+  begin
+    RefreshChecklistPanel;
+    pnlChecklist.Visible := True;
+    mmContent.Visible := False;
+  end
+  else
+  begin
+    UpdateContentMode;
+  end;
 end;
 
 procedure TNoteForm.mmContentChange(Sender: TObject);

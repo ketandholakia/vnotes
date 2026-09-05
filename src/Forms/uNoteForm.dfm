@@ -36,7 +36,7 @@ object NoteForm: TNoteForm
     OnMouseMove = pnlHeaderMouseMove
     OnMouseUp = pnlHeaderMouseUp
     object btnClose: TButton
-      Left = 272
+      Left = 240
       Top = 2
       Width = 28
       Height = 28
@@ -50,49 +50,64 @@ object NoteForm: TNoteForm
       TabOrder = 0
       OnClick = btnCloseClick
     end
-    object btnLock: TButton
-      Left = 240
+    object btnChecklist: TButton
+      Left = 272
       Top = 2
       Width = 28
       Height = 28
-      Caption = #62739
+      Caption = #9745
+      Font.Charset = DEFAULT_CHARSET
+      Font.Color = clWindowText
+      Font.Height = -16
+      Font.Name = 'Segoe UI'
+      Font.Style = []
+      ParentFont = False
       TabOrder = 1
-      OnClick = btnLockClick
+      OnClick = btnChecklistClick
     end
-    object btnCollapse: TButton
+    object btnLock: TButton
       Left = 208
       Top = 2
       Width = 28
       Height = 28
-      Caption = #9633
+      Caption = #62739
       TabOrder = 2
-      OnClick = btnCollapseClick
+      OnClick = btnLockClick
     end
-    object btnPin: TButton
+    object btnCollapse: TButton
       Left = 176
       Top = 2
       Width = 28
       Height = 28
-      Caption = #62668
+      Caption = #9633
       TabOrder = 3
-      OnClick = btnPinClick
+      OnClick = btnCollapseClick
     end
-    object btnColor: TButton
+    object btnPin: TButton
       Left = 144
       Top = 2
       Width = 28
       Height = 28
-      Caption = #62382
+      Caption = #62668
       TabOrder = 4
-      OnClick = btnColorClick
+      OnClick = btnPinClick
     end
-    object btnFavorite: TButton
+    object btnColor: TButton
       Left = 112
       Top = 2
       Width = 28
       Height = 28
-      Caption = #9733
+      Caption = #62382
       TabOrder = 5
+      OnClick = btnColorClick
+    end
+    object btnFavorite: TButton
+      Left = 80
+      Top = 2
+      Width = 28
+      Height = 28
+      Caption = #9733
+      TabOrder = 6
       OnClick = btnFavoriteClick
     end
   end
