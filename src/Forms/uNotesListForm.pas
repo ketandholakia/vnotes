@@ -250,14 +250,19 @@ begin
           Item.SubItems.Add(FormatDateTime('yyyy-mm-dd hh:nn', Note.UpdatedAt));
 
           // Phase 6B.2: tags AND checklist progress render independently -
-          // a note carrying both shows both. Columns align because every
-          // row adds exactly three subitems.
+          // a note carrying both shows both. Phase 6C.2 adds the Favorite
+          // star as a fourth subitem. Columns align because every row adds
+          // exactly four subitems.
           if Length(Note.Tags) > 0 then
             Item.SubItems.Add(String.Join(', ', Note.Tags))
           else
             Item.SubItems.Add('');
           Item.SubItems.Add(Format('%d/%d',
             [Note.ChecklistDoneCount, Note.ChecklistTotalCount]));
+          if Note.Favorite then
+            Item.SubItems.Add('★')
+          else
+            Item.SubItems.Add('');
 
           Item.Data := Pointer(Note);  // display-only reference, NOT owned
         end;

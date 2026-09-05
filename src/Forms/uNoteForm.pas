@@ -15,6 +15,7 @@ type
     btnClose: TButton;
     btnColor: TButton;
     btnPin: TButton;
+    btnFavorite: TButton;
     btnCollapse: TButton;
     btnLock: TButton;
     mmContent: TMemo;
@@ -55,6 +56,7 @@ type
     procedure btnCloseClick(Sender: TObject);
     procedure btnColorClick(Sender: TObject);
     procedure btnPinClick(Sender: TObject);
+    procedure btnFavoriteClick(Sender: TObject);
     procedure btnCollapseClick(Sender: TObject);
     procedure btnLockClick(Sender: TObject);
     procedure mmContentChange(Sender: TObject);
@@ -89,6 +91,7 @@ type
     procedure SaveNote;
     procedure ApplyColor;
     procedure UpdateUI;
+    procedure UpdateFavoriteButton;
     procedure ApplyTheme;
     procedure WMNCHitTest(var Message: TWMNCHitTest); message WM_NCHITTEST;
     procedure WMGetMinMaxInfo(var Message: TWMGetMinMaxInfo); message WM_GETMINMAXINFO;
@@ -339,6 +342,10 @@ begin
   btnCollapse.Enabled := not FNote.Locked;
   btnLock.Enabled := True;
   btnColor.Enabled := not FNote.Locked;
+  // Phase 6C.2: Favorite follows the same locked policy as the other
+  // header toggles (disabled control + silent no-op in the handler).
+  btnFavorite.Enabled := not FNote.Locked;
+  UpdateFavoriteButton;
 
   miAlwaysOnTop.Checked := FNote.AlwaysOnTop;
   miLock.Checked := FNote.Locked;
@@ -363,6 +370,16 @@ begin
     btnCollapse.Caption := '▣'
   else
     btnCollapse.Caption := '□';
+end;
+
+// Phase 6C.2: ★ filled = Favorite, ☆ outline = not. Same caption-swap
+// pattern as btnLock/btnCollapse above.
+procedure TNoteForm.UpdateFavoriteButton;
+begin
+  if FNote.Favorite then
+    btnFavorite.Caption := '★'
+  else
+    btnFavorite.Caption := '☆';
 end;
 
 procedure TNoteForm.ApplyTheme;
@@ -390,6 +407,18 @@ begin
     FormStyle := fsNormal;
   SaveNote;
   UpdateUI;
+end;
+
+// Phase 6C.2: Favorite toggle. Mirrors the tag handlers: model mutation,
+// immediate caption refresh, then the debounced autosave path (which
+// persists via TNoteManager.SaveNote and Touches UpdatedAt there).
+procedure TNoteForm.btnFavoriteClick(Sender: TObject);
+begin
+  if FNote.Locked then Exit;
+
+  FNote.ToggleFavorite;
+  UpdateFavoriteButton;
+  FEditorContext.ScheduleSave(FNote);
 end;
 
 procedure TNoteForm.btnCollapseClick(Sender: TObject);

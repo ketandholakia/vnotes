@@ -86,6 +86,15 @@ object NoteForm: TNoteForm
       TabOrder = 4
       OnClick = btnColorClick
     end
+    object btnFavorite: TButton
+      Left = 112
+      Top = 2
+      Width = 28
+      Height = 28
+      Caption = #9733
+      TabOrder = 5
+      OnClick = btnFavoriteClick
+    end
   end
   object mmContent: TMemo
     Left = 0

@@ -357,7 +357,11 @@ end;
 
 procedure TTrayForm.OnNoteChanged(const ANote: TNote);
 begin
-  // Note was saved, could update UI if needed
+  // Phase 6C.2: a save (e.g. Favorite toggle via autosave) resyncs an open
+  // Notes List so the star indicator and Favorite-first ordering appear.
+  // Same guard as create/delete - the list only ever reads notes.
+  if FNotesListForm <> nil then
+    FNotesListForm.RefreshList;
 end;
 
 procedure TTrayForm.OnNoteDeleted(const ANote: TNote);

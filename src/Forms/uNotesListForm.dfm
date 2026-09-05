@@ -52,7 +52,7 @@ object NotesListForm: TNotesListForm
     Columns = <
       item
         Caption = 'Title'
-        Width = 130
+        Width = 100
       end
       item
         Caption = 'Modified'
@@ -65,6 +65,10 @@ object NotesListForm: TNotesListForm
       item
         Caption = 'Checklist'
         Width = 65
+      end
+      item
+        Caption = #9733
+        Width = 30
       end>
     HideSelection = False
     RowSelect = True
