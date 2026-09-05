@@ -127,18 +127,9 @@ object NoteForm: TNoteForm
     TabOrder = 1
     OnChange = edTitleChange
   end
-  object sepTitle: TBevel
-    Left = 0
-    Top = 60
-    Width = 300
-    Height = 4
-    Align = alTop
-    Shape = bsBottomLine
-    Style = bsLowered
-  end
   object mmContent: TMemo
     Left = 0
-    Top = 64
+    Top = 60
     Width = 300
     Height = 170
     StyleElements = [seBorder]
