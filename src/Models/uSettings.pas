@@ -23,6 +23,7 @@ type
     FDarkTheme: Boolean;
     FHotkeyNewNote: string;
     FHotkeySearch: string;
+    FLastBackupAt: TDateTime;
     procedure SetDefaults;
   public
     constructor Create;
@@ -43,9 +44,13 @@ type
     property DarkTheme: Boolean read FDarkTheme write FDarkTheme;
     property HotkeyNewNote: string read FHotkeyNewNote write FHotkeyNewNote;
     property HotkeySearch: string read FHotkeySearch write FHotkeySearch;
+    property LastBackupAt: TDateTime read FLastBackupAt write FLastBackupAt;
   end;
 
 implementation
+
+uses
+  System.DateUtils, uILogger;
 
 { TSettings }
 
@@ -71,11 +76,14 @@ begin
   FDarkTheme := False;
   FHotkeyNewNote := 'Ctrl+Alt+N';
   FHotkeySearch := 'Ctrl+Alt+F';
+  FLastBackupAt := 0;
 end;
 
 procedure TSettings.LoadFromFile(const AFileName: string);
 var
   Ini: TIniFile;
+  LastBackupStr: string;
+  Logger: ILogger;
 begin
   SetDefaults;
   if not FileExists(AFileName) then Exit;
@@ -95,6 +103,23 @@ begin
     FDarkTheme := Ini.ReadBool('Appearance', 'DarkTheme', FDarkTheme);
     FHotkeyNewNote := Ini.ReadString('Hotkeys', 'NewNote', FHotkeyNewNote);
     FHotkeySearch := Ini.ReadString('Hotkeys', 'Search', FHotkeySearch);
+
+    LastBackupStr := Ini.ReadString('Backup', 'LastBackupAt', '');
+    if LastBackupStr <> '' then
+    begin
+      try
+        FLastBackupAt := ISO8601ToDate(LastBackupStr, False);
+      except
+        on E: Exception do
+        begin
+          FLastBackupAt := 0;
+          Logger := CreateLogger;
+          Logger.Warning('Settings: Failed to parse LastBackupAt timestamp "' + LastBackupStr + '": ' + E.Message);
+        end;
+      end;
+    end
+    else
+      FLastBackupAt := 0;
   finally
     Ini.Free;
   end;
@@ -117,6 +142,10 @@ begin
     Ini.WriteBool('Backup', 'Enabled', FBackupEnabled);
     Ini.WriteInteger('Backup', 'IntervalDays', FBackupIntervalDays);
     Ini.WriteInteger('Backup', 'RetentionDays', FBackupRetentionDays);
+    if FLastBackupAt > 0 then
+      Ini.WriteString('Backup', 'LastBackupAt', DateToISO8601(FLastBackupAt, False))
+    else
+      Ini.WriteString('Backup', 'LastBackupAt', '');
     Ini.WriteBool('Appearance', 'DarkTheme', FDarkTheme);
     Ini.WriteString('Hotkeys', 'NewNote', FHotkeyNewNote);
     Ini.WriteString('Hotkeys', 'Search', FHotkeySearch);
@@ -142,6 +171,7 @@ begin
   FDarkTheme := Source.FDarkTheme;
   FHotkeyNewNote := Source.FHotkeyNewNote;
   FHotkeySearch := Source.FHotkeySearch;
+  FLastBackupAt := Source.FLastBackupAt;
 end;
 
 end.

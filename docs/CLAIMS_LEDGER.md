@@ -12,7 +12,7 @@ This ledger tracks the verification of forward-looking and current-state claims 
 | `title-in-note-UI` | Phase 4D wishlist (line 518, 535, 556) | **STALE** (shipped 6E.1) | Corrected (doc) | 2026-09-06 |
 | `backup retention` | Phase 4D wishlist (line 518, 535, 556) | **STALE** (shipped 4H) | Corrected (doc) | 2026-09-06 |
 | `hotkey-failure surfacing` | Phase 4D wishlist (line 518, 535, 556) | **STALE** (shipped 5A) | Corrected (doc) | 2026-09-06 |
-| `persisted last-backup time` | Phase 4D wishlist (line 518, 535, 556) | **TRUE** (in-memory only currently) | Confirmed | 2026-09-06 |
+| `persisted last-backup time` | Phase 4D wishlist (line 518, 535, 556) | **STALE** (shipped 6H) | Implemented and validated in Phase 6H | 2026-09-06 |
 | `SQLite storage: NOT IMPLEMENTED (stub only)` | Trailing block (line 280), 4A | **TRUE** (uSQLiteStorage exists as stub) | Confirmed | 2026-09-06 |
 | `Rich text: NOT IMPLEMENTED` | Trailing block (line 283) | **TRUE** | Confirmed | 2026-09-06 |
 | `High-DPI: NOT ADDRESSED` | Current Risks, Trailing block | **TRUE** | Confirmed | 2026-09-06 |

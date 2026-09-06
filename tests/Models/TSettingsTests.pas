@@ -3,7 +3,7 @@ unit TSettingsTests;
 interface
 
 uses
-  System.SysUtils, System.Classes, System.IOUtils,
+  System.SysUtils, System.Classes, System.IOUtils, System.DateUtils,
   DUnitX.TestFramework, uSettings, uEnums;
 
 type
@@ -22,6 +22,14 @@ type
     procedure TestAssignIsDeepCopyOfStrings;
     [Test]
     procedure TestAssignFromNilIsSafe;
+    [Test]
+    procedure TestDefaultLastBackupAt;
+    [Test]
+    procedure TestSaveLoadLastBackupAt;
+    [Test]
+    procedure TestMissingLastBackupAt;
+    [Test]
+    procedure TestMalformedLastBackupAt;
   end;
 
 implementation
@@ -198,6 +206,93 @@ begin
       'Assign(nil) must not corrupt existing values');
   finally
     S.Free;
+  end;
+end;
+
+procedure TSettingsTestFixture.TestDefaultLastBackupAt;
+var
+  S: TSettings;
+begin
+  S := TSettings.Create;
+  try
+    Assert.AreEqual(0.0, Double(S.LastBackupAt), 0.0001,
+      'Default LastBackupAt should be 0 (unset)');
+  finally
+    S.Free;
+  end;
+end;
+
+procedure TSettingsTestFixture.TestSaveLoadLastBackupAt;
+var
+  S1, S2: TSettings;
+  TempFile: string;
+  KnownTime: TDateTime;
+begin
+  S1 := TSettings.Create;
+  try
+    KnownTime := EncodeDateTime(2026, 9, 6, 12, 30, 45, 0);
+    S1.LastBackupAt := KnownTime;
+    TempFile := TPath.GetTempPath + 'StickyNotes_LastBackup_Test.ini';
+    try
+      S1.SaveToFile(TempFile);
+      S2 := TSettings.Create;
+      try
+        S2.LoadFromFile(TempFile);
+        Assert.AreEqual(Double(KnownTime), Double(S2.LastBackupAt), 0.0001,
+          'LastBackupAt should round-trip through settings file');
+      finally
+        S2.Free;
+      end;
+    finally
+      if TFile.Exists(TempFile) then
+        TFile.Delete(TempFile);
+    end;
+  finally
+    S1.Free;
+  end;
+end;
+
+procedure TSettingsTestFixture.TestMissingLastBackupAt;
+var
+  S: TSettings;
+  TempFile: string;
+begin
+  TempFile := TPath.GetTempPath + 'StickyNotes_MissingLastBackup_Test.ini';
+  try
+    TFile.WriteAllText(TempFile, '[General]' + sLineBreak + 'AutoStart=0' + sLineBreak);
+    S := TSettings.Create;
+    try
+      S.LoadFromFile(TempFile);
+      Assert.AreEqual(0.0, Double(S.LastBackupAt), 0.0001,
+        'Missing LastBackupAt setting should default to 0');
+    finally
+      S.Free;
+    end;
+  finally
+    if TFile.Exists(TempFile) then
+      TFile.Delete(TempFile);
+  end;
+end;
+
+procedure TSettingsTestFixture.TestMalformedLastBackupAt;
+var
+  S: TSettings;
+  TempFile: string;
+begin
+  TempFile := TPath.GetTempPath + 'StickyNotes_MalformedLastBackup_Test.ini';
+  try
+    TFile.WriteAllText(TempFile, '[Backup]' + sLineBreak + 'LastBackupAt=INVALID_DATE_STRING' + sLineBreak);
+    S := TSettings.Create;
+    try
+      S.LoadFromFile(TempFile);
+      Assert.AreEqual(0.0, Double(S.LastBackupAt), 0.0001,
+        'Malformed LastBackupAt setting should fall back to 0 without crashing');
+    finally
+      S.Free;
+    end;
+  finally
+    if TFile.Exists(TempFile) then
+      TFile.Delete(TempFile);
   end;
 end;
 

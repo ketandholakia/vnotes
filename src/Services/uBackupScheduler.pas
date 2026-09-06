@@ -73,7 +73,10 @@ begin
   FIntervalDays := 0;
   FIsBusy := False;
   FIsRunning := False;
-  FLastBackupAt := 0;
+  if FSettings <> nil then
+    FLastBackupAt := FSettings.LastBackupAt
+  else
+    FLastBackupAt := 0;
   FTimer := TTimer.Create(nil);
   FTimer.Enabled := False;
   FTimer.OnTimer := OnTimer;
@@ -110,6 +113,9 @@ begin
 end;
 
 procedure TBackupScheduler.OnTimer(Sender: TObject);
+var
+  BackupSuccess: Boolean;
+  BackupTime: TDateTime;
 begin
   if FIsBusy then Exit;
   if not Assigned(FBackupService) then Exit;
@@ -121,8 +127,13 @@ begin
   end;
   FIsBusy := True;
   try
-    FLastBackupAt := Now;
-    FBackupService.Backup;
+    BackupTime := Now;
+    BackupSuccess := FBackupService.Backup;
+    if BackupSuccess then
+    begin
+      FLastBackupAt := BackupTime;
+      FSettings.LastBackupAt := FLastBackupAt;
+    end;
   finally
     FIsBusy := False;
   end;

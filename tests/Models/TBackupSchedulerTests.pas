@@ -3,7 +3,7 @@ unit TBackupSchedulerTests;
 interface
 
 uses
-  System.SysUtils, System.Classes, System.IOUtils,
+  System.SysUtils, System.Classes, System.IOUtils, System.DateUtils,
   DUnitX.TestFramework,
   uBackupScheduler, uBackupService, uSettings, uNoteManager, uStorage,
   uJsonStorage, uNote, uEnums;
@@ -48,6 +48,12 @@ type
     procedure TestBackupRetentionCleanup;
     [Test]
     procedure TestLargeIntervalClamping;
+    [Test]
+    procedure TestSchedulerRestoresPersistedTimestamp;
+    [Test]
+    procedure TestSuccessfulBackupUpdatesTimestamp;
+    [Test]
+    procedure TestFailedBackupDoesNotUpdateTimestamp;
   end;
 
 implementation
@@ -202,6 +208,78 @@ begin
     'Scheduler should start even with very large interval (clamped internally)');
   Assert.AreEqual(100000, FScheduler.IntervalDays,
     'IntervalDays setting should be preserved as-is');
+end;
+
+procedure TBackupSchedulerTestFixture.TestSchedulerRestoresPersistedTimestamp;
+var
+  KnownTime: TDateTime;
+  LocalSettings: TSettings;
+  LocalScheduler: TBackupScheduler;
+begin
+  KnownTime := EncodeDateTime(2026, 9, 6, 10, 0, 0, 0);
+  LocalSettings := TSettings.Create;
+  try
+    LocalSettings.LastBackupAt := KnownTime;
+    LocalScheduler := TBackupScheduler.Create(FBackupService, LocalSettings);
+    try
+      Assert.AreEqual(Double(KnownTime), Double(LocalScheduler.LastBackupAt), 0.0001,
+        'Scheduler must initialize LastBackupAt from persisted settings');
+    finally
+      LocalScheduler.Free;
+    end;
+  finally
+    LocalSettings.Free;
+  end;
+end;
+
+procedure TBackupSchedulerTestFixture.TestSuccessfulBackupUpdatesTimestamp;
+var
+  BeforeTime: TDateTime;
+begin
+  BeforeTime := Now;
+  FSettings.BackupEnabled := True;
+  FScheduler.TickNow;
+  Assert.IsTrue(FScheduler.LastBackupAt >= BeforeTime,
+    'Scheduler LastBackupAt should be updated after successful backup');
+  Assert.IsTrue(FSettings.LastBackupAt >= BeforeTime,
+    'Settings LastBackupAt should be updated after successful backup');
+end;
+
+type
+  TFailedBackupServiceStub = class(TBackupService)
+  public
+    function Backup: Boolean; override;
+  end;
+
+function TFailedBackupServiceStub.Backup: Boolean;
+begin
+  Result := False;
+end;
+
+procedure TBackupSchedulerTestFixture.TestFailedBackupDoesNotUpdateTimestamp;
+var
+  PrevTime: TDateTime;
+  BadScheduler: TBackupScheduler;
+  FailedService: TBackupService;
+begin
+  PrevTime := EncodeDateTime(2026, 1, 1, 12, 0, 0, 0);
+  FSettings.LastBackupAt := PrevTime;
+
+  FailedService := TFailedBackupServiceStub.Create(FNoteManager, FSettings, FBackupPath);
+  try
+    BadScheduler := TBackupScheduler.Create(FailedService, FSettings);
+    try
+      BadScheduler.TickNow;
+      Assert.AreEqual(Double(PrevTime), Double(BadScheduler.LastBackupAt), 0.0001,
+        'Scheduler LastBackupAt must remain unchanged on failed backup');
+      Assert.AreEqual(Double(PrevTime), Double(FSettings.LastBackupAt), 0.0001,
+        'Settings LastBackupAt must remain unchanged on failed backup');
+    finally
+      BadScheduler.Free;
+    end;
+  finally
+    FailedService.Free;
+  end;
 end;
 
 initialization

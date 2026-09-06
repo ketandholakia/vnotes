@@ -983,6 +983,44 @@ Two precision tests added to `tests/Models/TBackupServiceTests.pas`:
 
 > **Status:** **COMPLETE + CLOSED** — Phase 6G audit complete; missing phases reconstructed; stale claims updated with inline corrections; `CLAIMS_LEDGER.md` established. Build: docs only. Commit: `dbc5bc4`
 
+## Phase 6H — Persisted Last-Backup Timestamp — COMPLETE + VALIDATED (2026-09-06)
+
+> **Status:** **COMPLETE + VALIDATED** — Last-backup timestamp persistence implemented using the existing `TSettings` INI infrastructure (`[Backup] LastBackupAt`). `TBackupScheduler` initializes `LastBackupAt` from settings and updates/persists it only upon successful backup operations. Failed backups leave `LastBackupAt` unchanged. Comprehensive DUnitX coverage added (7 new tests across settings and scheduler).
+
+### What Changed
+
+- **`TSettings` (`src/Models/uSettings.pas`)**:
+  - Added `LastBackupAt: TDateTime` property.
+  - Implemented ISO8601 formatting and parsing (`DateToISO8601` / `ISO8601ToDate`) under section `[Backup] LastBackupAt`.
+  - Added safe fallback handling: missing or malformed ISO8601 values log a warning and fall back to `0` (unset) without crashing or corrupting settings.
+  - Updated `Assign` and `SetDefaults` to maintain deep-copy and default semantics.
+- **`TBackupService` (`src/Services/uBackupService.pas`)**:
+  - Changed `Backup` signature to `function Backup: Boolean; virtual;` so it returns `True` only when zip creation and retention cleanup complete successfully.
+- **`TBackupScheduler` (`src/Services/uBackupScheduler.pas`)**:
+  - Initialized `FLastBackupAt` from `FSettings.LastBackupAt` on scheduler creation.
+  - Updated `OnTimer` backup execution logic to check `FBackupService.Backup` return value; updates `FLastBackupAt` and `FSettings.LastBackupAt` only on successful backup.
+- **Test Suites**:
+  - `TSettingsTests.pas`: Added 4 tests covering default unset state, save/load round-trip, missing INI setting, and malformed timestamp handling.
+  - `TBackupSchedulerTests.pas`: Added 3 tests covering scheduler restoration of persisted timestamp, timestamp update on successful backup, and timestamp preservation on failed backup using `TFailedBackupServiceStub`.
+
+### Validation Results (2026-09-06)
+
+| # | Check | Result |
+|---|-------|--------|
+| 1 | Main build (`build.bat`) | **PASS** — 0 errors |
+| 2 | Automated Test Suite (`build_tests.bat` + `StickyNotes.Tests.exe`) | **PASS** — **155 Found / 155 Passed / 0 Failed / 0 Errored / 0 Leaked / 0 Ignored** (148 baseline + 7 new) |
+| 3 | MSBuild (`msbuild src\StickyNotes.dproj /t:Build /p:Config=Debug /p:Platform=Win32`) | **PASS** — 0 errors |
+| 4 | Git Diff Check (`git diff --check`) | **PASS** — clean |
+| 5 | Manual GUI Smoke | **PASS** — (Scenario A: first backup populates timestamp; Scenario B: application restart restores timestamp in scheduler; Scenario C: failed backup leaves timestamp untouched). |
+
+### Known Issues
+
+- None.
+
+### Next Recommended Task
+
+- None. All planned Phase 6 tasks are complete and validated.
+
 ---
 
 *Document created: 2026-08-31*

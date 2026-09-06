@@ -28,7 +28,7 @@ type
   public
     constructor Create(ANoteManager: TNoteManager; ASettings: TSettings; const ABackupPath: string);
     destructor Destroy; override;
-    procedure Backup;
+    function Backup: Boolean; virtual;
     procedure Restore(const ABackupFile: string);
     procedure CleanupOldBackups;
     function GetBackupFileName: string;
@@ -85,7 +85,7 @@ begin
   end;
 end;
 
-procedure TBackupService.Backup;
+function TBackupService.Backup: Boolean;
 var
   ZipFile: string;
   Success: Boolean;
@@ -113,6 +113,7 @@ begin
       FOnComplete(False, 'Backup failed');
     Logger.Error('Backup: Backup failed - see CreateBackupZip for details');
   end;
+  Result := Success;
 end;
 
 function TBackupService.CreateBackupZip(const AZipFile: string): Boolean;
