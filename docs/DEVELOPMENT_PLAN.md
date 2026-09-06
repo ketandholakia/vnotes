@@ -890,5 +890,74 @@ The above entry was drafted from a review of the in-tree diff without a local co
 
 ---
 
+## Phase 6F — Backup / Restore Schema Coverage — COMPLETE + CLOSED (2026-09-06)
+
+> **Status:** **COMPLETE + CLOSED** — Investigation found the alleged problem was already solved: `TBackupService.CreateBackupZip` and `DoRestore` already write/read `schemaVersion: 3`, `Favorite`, `tags`, and `checklistItems` with tolerant defaults. The 6D/6E carry-forward "known issue" was documented before the implementation was code-reviewed; it was incorrect. Two precision tests were added to make the existing coverage explicit and unambiguous. **148/148 tests PASS** (146 baseline + 2 new), 0 Failed / 0 Errored / 0 Leaked. Build: 0 errors. Commit: `c4782f3`.
+
+### Investigation Findings (Step 1)
+
+**`CreateBackupZip` already writes (lines 156–216 of `uBackupService.pas`):**
+- `schemaVersion: 3` (hard-coded, line 158)
+- `Favorite` (line 170)
+- `tags` — array of strings, always written (empty array if no tags, lines 175–188)
+- `checklistItems` — array of `{text, done}` objects, always written (lines 191–209)
+
+**`DoRestore` already reads (lines 359–434) with tolerant defaults:**
+- `Favorite` — `TJSONTrue` check, default `False` if missing/wrong-typed
+- `tags` — reads `TJSONArray`, skips non-`TJSONString` elements, defaults to empty
+- `checklistItems` — reads `TJSONArray`, skips non-`TJSONObject` elements, defaults blank text and `False` done
+
+**Legacy backup compatibility:** Field names are identical to `TJsonStorage` format (case-sensitive). `DoRestore`'s tolerant readers handle any combination of missing fields; a pre-6A backup (no `tags`, no `checklistItems`, no `Favorite`) restores with all three defaulted correctly.
+
+**Backup flush analysis (Step 2.4):** `CreateBackupZip` iterates `FNoteManager.Notes[I]` — it reads in-memory `TNote` objects, not on-disk files. In-flight debounced edits are held in the live `TNote` objects (not yet written to disk by `TAutosaveService`), so **the backup always captures the most current in-memory state**. No flush needed for backup, only for restore (already implemented in Phase 6D).
+
+**Circular dependency check:** `uBackupService` uses `uNote`, `uEnums`, `uNoteManager`, `uSettings`, `uILogger` — no `uJsonStorage`. No circular dependency; no shared-serializer refactoring required.
+
+**Existing test coverage (before 6F):** `TestBackupContainsExpectedData` (schemaVersion=3, all v3 fields in archive), `TestRestoreSuccess` (Favorite, tag, checklist round-trip), `TestBackupRoundTripPreservesV3Fields` (3 tags, 3 checklist items, Favorite full round-trip), `TestRestoreLegacy13FieldBackupDefaultsNewFields` (legacy format defaults), `TestRestoreCorruptedFile` (corrupt-ZIP skip) — all already passing.
+
+### What Changed
+
+No source code changes to `uBackupService.pas` or any other unit — the implementation was already correct.
+
+Two precision tests added to `tests/Models/TBackupServiceTests.pas`:
+
+- [x] **`TestRestoreSkipsMalformedJsonEntryInValidZip`** (Step 3.4 precision) — constructs a valid ZIP containing one well-formed v3 note JSON + one unparseable JSON file; asserts: restore completes (does not abort), exactly 1 note is restored, the good note's `Title` and `ID` are correct, the malformed entry is silently skipped. Fills the gap in the existing `TestRestoreCorruptedFile` test which tests a corrupt-ZIP (not-a-ZIP) but not a valid ZIP with an internal malformed entry.
+
+- [x] **`TestBackupRoundTripPreservesTagOrderAndCasing`** (Step 3.1 precision) — adds a note with 3 tags (`'Alpha'`, `'beta'`, `'GAMMA'`) and 3 checklist items with alternating `Done` flags; after backup → clear → restore, asserts **exact index** (`Tags[0]`, `Tags[1]`, `Tags[2]`) and **exact casing** are preserved — not just `HasTag` membership. Also pins checklist item order, `Text`, `Done`, and `Favorite`. Fills the gap in `TestBackupRoundTripPreservesV3Fields` which used `HasTag` (membership only, order/casing not pinned).
+
+### Design Notes
+
+- **No implementation needed** — The "backup/restore schema gap" documented in Phase 6D ("carry-forward known issue" in Phase 6E) was recorded based on an incorrect reading of the code. The implementation in `uBackupService.pas` was already v3-complete. Future sessions should treat this entry as the authoritative source and disregard the 6D/6E gap statements.
+- **Backup reads in-memory objects** — because `CreateBackupZip` reads `FNoteManager.Notes[I]` (live `TNote` objects), not disk files, it always captures the latest state including any in-flight autosave changes. This is correct behavior and does not require a flush.
+- **No new units, no `.dproj` changes, no schema changes** — test-only diff.
+
+### Validation Results (2026-09-06)
+
+| # | Check | Result |
+|---|-------|--------|
+| 1 | `build.bat` (Win32 Debug, dcc32 v36.0) | **PASS** — 0 errors (pre-existing hints + W1024 only) |
+| 2 | `build_tests.bat` + run | **PASS** — **148 Found / 148 Passed / 0 Failed / 0 Errored / 0 Leaked / 0 Ignored** (146 baseline + 2 new) |
+| 3 | `msbuild src\StickyNotes.dproj /t:Build /p:Config=Debug /p:Platform=Win32` | **PASS** — 0 errors |
+| 4 | `git diff --check` | **PASS** — no trailing whitespace |
+| 5 | Manual GUI smoke | **Deferred** — headless environment; all paths covered by automated suite |
+| 6 | `git commit` | **c4782f3** — 1 file changed, 121 insertions |
+
+### Files Changed During Phase 6F
+
+| File | Change |
+|------|--------|
+| `tests/Models/TBackupServiceTests.pas` | 2 new tests: `TestRestoreSkipsMalformedJsonEntryInValidZip`, `TestBackupRoundTripPreservesTagOrderAndCasing` |
+| `docs/DEVELOPMENT_PLAN.md` | This Phase 6F closure entry; 6D/6E carry-forward marked RESOLVED |
+
+### Resolved: 6D / 6E Carry-Forward Known Issue
+
+> **6D entry said:** "Backup/restore schema gap — `TBackupService` serializes and deserializes notes using a hardcoded legacy field set (no `schemaVersion`, no `tags`, no `checklistItems`, no `favorite`). A backup taken after Phase 6A/6C changes will restore notes without those fields."
+
+> **6E entry said:** "`TBackupService` still uses the legacy serializer; backup → restore drops tags/checklistItems/favorite (carry-forward from Phase 6D, tracked there)."
+
+**RESOLVED — these statements were incorrect.** Code review in Phase 6F confirmed that `uBackupService.pas` already writes `schemaVersion: 3`, `Favorite`, `tags`, and `checklistItems` in `CreateBackupZip`, and reads them with tolerant defaults in `DoRestore`. The gap was documented before the implementation was verified. No corrective action was required.
+
+---
+
 *Document created: 2026-08-31*
 *Last updated: 2026-09-06*
