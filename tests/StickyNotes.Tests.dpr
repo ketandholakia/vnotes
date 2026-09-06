@@ -19,7 +19,10 @@ uses
   TBackupSchedulerTests in 'Models\TBackupSchedulerTests.pas',
   TBackupServiceTests in 'Models\TBackupServiceTests.pas',
   TMonitorUtilsTests in 'Models\TMonitorUtilsTests.pas',
-  TStorageMigrationServiceTests in 'Models\TStorageMigrationServiceTests.pas';
+  TStorageMigrationServiceTests in 'Models\TStorageMigrationServiceTests.pas',
+  TPhase6LReadinessTests in 'Models\TPhase6LReadinessTests.pas',
+  uStorageMigrationOrchestrator in '..\src\Services\uStorageMigrationOrchestrator.pas',
+  TPhase6MActivationTests in 'Models\TPhase6MActivationTests.pas';
 
 var
   runner: ITestRunner;

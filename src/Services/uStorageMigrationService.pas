@@ -107,6 +107,7 @@ begin
         ExistingNotes.Free;
       end;
     finally
+      SqlStorage.Finalize;
       SqlStorage.Free;
     end;
   end;
@@ -265,6 +266,7 @@ begin
         end;
       end;
     finally
+      SqlStorage.Finalize;
       SqlStorage.Free;
     end;
   finally

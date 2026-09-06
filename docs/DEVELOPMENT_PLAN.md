@@ -1085,3 +1085,68 @@ Two precision tests added to `tests/Models/TBackupServiceTests.pas`:
 
 *Document created: 2026-08-31*
 *Last updated: 2026-09-06*
+
+## Phase 6L — SQLite Production Readiness — COMPLETE + VALIDATED (2026-09-06)
+
+> **Status:** **COMPLETE + VALIDATED** — Phase 6L implements the production readiness layer for SQLite without switching production storage or running automatic startup migration. Implemented SQLite-aware backup packaging in `TBackupService` (packages `vnotes.db` alongside `settings.ini`, `manifest.json`, and `notes/*.json`), SQLite database restore with `PRAGMA quick_check` integrity validation, legacy JSON backup restore compatibility (automatically creates and migrates `vnotes.db` on restoring legacy JSON ZIP archives), safe atomic database replacement (uses `.bak` rollback to guarantee pre-existing user databases are never destroyed on failure), and `TStorageResolver` for clean storage driver resolution (`src/Storage/uStorageResolver.pas`). Extended `TSettings` with `StorageBackend`, `MigrationCompleted`, and `MigrationTimestamp` properties. Added comprehensive unit tests in `TPhase6LReadinessTests.pas` (**199/199 total tests PASS**). **Production storage backend strictly remains JSON (`TJsonStorage`)**. Production backend switch and automatic startup migration are explicitly deferred to Phase 6M.
+
+### What Changed
+
+- **`TStorageResolver` (`src/Storage/uStorageResolver.pas`)**:
+  - Implemented `TStorageResolver.ResolveStorage(const AAppDataPath: string; ASettings: TSettings): INoteStorage`.
+  - Returns `TSQLiteStorage` when `StorageBackend = 'SQLite'` and `MigrationCompleted = True`; otherwise returns `TJsonStorage`.
+- **`TBackupService` (`src/Services/uBackupService.pas`)**:
+  - Added `ValidateSQLiteDatabase(const ADbPath: string; const ALogger: ILogger): Boolean` using FireDAC `PRAGMA quick_check;`.
+  - Updated `CreateBackupZip` to include `vnotes.db` in backup ZIP archives when present in the AppData directory.
+  - Updated `DoRestore` to support restoring `vnotes.db` from SQLite backup ZIP archives with `PRAGMA quick_check` validation.
+  - Added legacy JSON restore compatibility: restoring legacy JSON ZIP archives automatically builds and migrates `vnotes.db` via `TStorageMigrationService`.
+  - Implemented safe atomic database replacement (`.bak` backup/restore pattern) to ensure pre-existing production databases are never destroyed or corrupted if restore fails.
+- **`TSettings` (`src/Models/uSettings.pas`)**:
+  - Added `StorageBackend` (default `'JSON'`), `MigrationCompleted` (default `False`), and `MigrationTimestamp` (default `''`) properties with full INI persistence and `Assign` support.
+- **`TNoteApplication` (`src/Application/uNoteApplication.pas`)**:
+  - Instantiates `FStorage` via `TStorageResolver.ResolveStorage`. Production storage remains `TJsonStorage`.
+- **`TPhase6LReadinessTests` (`tests/Models/TPhase6LReadinessTests.pas`)**:
+  - Added 10 unit tests covering storage resolver defaults and configuration, storage settings persistence, SQLite ZIP backup packaging, SQLite ZIP restore, corrupt SQLite DB rejection, legacy JSON backup restore migration, database ownership safety on failure, and production backend confirmation.
+- **Registrations**:
+  - `src/StickyNotes.dpr` and `tests/StickyNotes.Tests.dpr`.
+
+### Validation Results (2026-09-06)
+
+| # | Check | Result |
+|---|-------|--------|
+| 1 | Main build (`build.bat`) | **PASS** — 0 errors |
+| 2 | Automated Test Suite (`build_tests.bat` + `StickyNotes.Tests.exe`) | **PASS** — **199 Found / 199 Passed / 0 Failed / 0 Errored / 0 Leaked / 0 Ignored** (189 baseline + 10 new) |
+| 3 | MSBuild (`msbuild src\StickyNotes.dproj /t:Build /p:Config=Debug /p:Platform=Win32`) | **PASS** — 0 errors |
+| 4 | Git Diff Check (`git diff --check`) | **PASS** — clean |
+| 5 | Production Safety Verification | **PASS** — `TJsonStorage` remains production backend; zero automatic startup migration executed; existing JSON note files untouched; pre-existing database files protected on restore failure. |
+
+## Phase 6M — SQLite Production Activation — COMPLETE + VALIDATED (2026-09-06)
+
+> **Status:** **COMPLETE + VALIDATED** — Phase 6M accomplishes the controlled, safe transition from `TJsonStorage` to `TSQLiteStorage` as the production authoritative storage backend for V-Notes. Implemented startup state orchestration in `TStorageMigrationOrchestrator` (`src/Services/uStorageMigrationOrchestrator.pas`). For existing installations, JSON notes are migrated to `vnotes.db` atomically with 1:1 semantic verification, setting `Backend=SQLite`, `MigrationCompleted=True`, and `MigrationTimestamp`. Fresh installations default directly to `TSQLiteStorage`. Interrupted migrations are reconciled without note duplication. Pre-existing divergent SQLite databases are safely quarantined to `vnotes.db.orphan.<timestamp>` without data loss. Active SQLite failure strictly enters recovery/error state without silent fallback to stale JSON notes. Backup, scheduled backup, and restore routines remain 100% operational with SQLite authoritative. All 210 DUnitX tests pass (**210/210 total tests PASS**).
+
+### What Changed
+
+- **`TStorageMigrationOrchestrator` (`src/Services/uStorageMigrationOrchestrator.pas`)**:
+  - Centralized startup storage state machine and migration orchestration.
+  - Handles active SQLite state validation, fresh install initialization, unmigrated JSON migration, interrupted migration reconciliation, and divergent database quarantine.
+  - Enforces zero silent fallback to stale JSON notes when SQLite is authoritative.
+- **`TStorageResolver` (`src/Storage/uStorageResolver.pas`)**:
+  - Delegates to `TStorageMigrationOrchestrator.OrchestrateStorage`.
+- **`TNoteApplication` (`src/Application/uNoteApplication.pas`)**:
+  - Loads settings first and passes `SettingsIniPath` to `ResolveStorage` before `TNoteManager` creation, ensuring `TNoteManager` receives `TSQLiteStorage` from startup.
+- **`TBackupService` (`src/Services/uBackupService.pas`)**:
+  - Updated SQLite and legacy JSON backup restore to work seamlessly with SQLite primary, maintaining SQLite backend after legacy JSON restore.
+- **`TPhase6MActivationTests` (`tests/Models/TPhase6MActivationTests.pas`)**:
+  - Added 11 comprehensive DUnitX tests covering existing installation migration, repeated startup idempotency, fresh install, empty JSON installation, interrupted migration recovery, divergent database quarantine, missing/corrupt active DB rejection without JSON fallback, SQLite backup/restore, and legacy JSON restore under SQLite primary.
+- **Registrations**:
+  - `src/StickyNotes.dpr` and `tests/StickyNotes.Tests.dpr`.
+
+### Validation Results (2026-09-06)
+
+| # | Check | Result |
+|---|-------|--------|
+| 1 | Main build (`build.bat`) | **PASS** — 0 errors |
+| 2 | Automated Test Suite (`build_tests.bat` + `StickyNotes.Tests.exe`) | **PASS** — **210 Found / 210 Passed / 0 Failed / 0 Errored / 0 Leaked / 0 Ignored** |
+| 3 | MSBuild (`msbuild src\StickyNotes.dproj /t:Build /p:Config=Debug /p:Platform=Win32`) | **PASS** — 0 errors |
+| 4 | Git Diff Check (`git diff --check`) | **PASS** — clean |
+| 5 | Data Integrity & Recovery Verification | **PASS** — Original JSON files preserved untouched; no dual-write; no stale JSON fallback; no silent database overwrites. |

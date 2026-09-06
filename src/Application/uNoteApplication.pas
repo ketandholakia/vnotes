@@ -9,7 +9,7 @@ uses
   uNote, uNoteManager, uSettings, uSettingsController,
   uAutosaveService, uHotkeyService, uThemeService, uBackupService,
   uBackupScheduler,
-  uStorage, uJsonStorage;
+  uStorage, uJsonStorage, uStorageResolver, uStorageMigrationOrchestrator;
 
 type
   TNoteApplication = class
@@ -60,19 +60,23 @@ implementation
 { TNoteApplication }
 
 constructor TNoteApplication.Create(const AHandle: HWND);
+var
+  SettingsIniPath: string;
 begin
   inherited Create;
   FAppDataPath := GetAppDataPath;
 
-  FSettingsController := TSettingsController.Create(
-    TPath.Combine(FAppDataPath, 'settings.ini'));
+  SettingsIniPath := TPath.Combine(FAppDataPath, 'settings.ini');
+  FSettingsController := TSettingsController.Create(SettingsIniPath);
+  FSettingsController.LoadSettings;
 
   FThemeService := TThemeService.Create;
   FAutosaveService := TAutosaveService.Create(
     FSettingsController.GetSettings.AutosaveDelay);
   FHotkeyService := THotkeyService.Create(AHandle);
 
-  FStorage := TJsonStorage.Create(FAppDataPath);
+  TStorageMigrationOrchestrator.OrchestrateStorage(FAppDataPath, FSettingsController.GetSettings, SettingsIniPath);
+  FStorage := TStorageResolver.ResolveStorage(FAppDataPath, FSettingsController.GetSettings);
 
   FNoteManager := TNoteManager.Create(FStorage);
 

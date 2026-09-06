@@ -32,6 +32,7 @@ type
     procedure Restore(const ABackupFile: string);
     procedure CleanupOldBackups;
     function GetBackupFileName: string;
+    class function ValidateSQLiteDatabase(const ADbPath: string; const ALogger: ILogger): Boolean;
     property OnProgress: TBackupProgress read FOnProgress write FOnProgress;
     property OnComplete: TBackupComplete read FOnComplete write FOnComplete;
   end;
@@ -39,7 +40,9 @@ type
 implementation
 
 uses
-  System.Types, System.JSON, uNote, uEnums;
+  System.Types, System.JSON, uNote, uEnums,
+  FireDAC.Comp.Client, FireDAC.Phys.SQLite, FireDAC.Phys.SQLiteDef,
+  uSQLiteStorage, uStorageMigrationService;
 
 function GetRelativePath(const ABasePath, AFileName: string): string;
 var
@@ -56,6 +59,54 @@ end;
 function DateTimeToISO8601(const ADateTime: TDateTime): string;
 begin
   Result := FormatDateTime('yyyy-mm-dd"T"hh:nn:ss', ADateTime);
+end;
+
+class function TBackupService.ValidateSQLiteDatabase(const ADbPath: string; const ALogger: ILogger): Boolean;
+var
+  Conn: TFDConnection;
+  Query: TFDQuery;
+  Res: string;
+begin
+  Result := False;
+  if not TFile.Exists(ADbPath) then Exit;
+
+  try
+    Conn := TFDConnection.Create(nil);
+    try
+      Conn.DriverName := 'SQLite';
+      Conn.Params.Values['Database'] := ADbPath;
+      Conn.Params.Values['OpenMode'] := 'ReadWrite';
+      Conn.Params.Values['Pooled'] := 'False';
+      Conn.Open;
+
+      Query := TFDQuery.Create(nil);
+      try
+        Query.Connection := Conn;
+        Query.SQL.Text := 'PRAGMA quick_check;';
+        Query.Open;
+        if not Query.Eof then
+        begin
+          Res := Query.Fields[0].AsString;
+          if SameText(Res, 'ok') then
+            Result := True
+          else if ALogger <> nil then
+            ALogger.Error('SQLite database validation failed (quick_check): ' + Res);
+        end;
+      finally
+        Query.Free;
+      end;
+    finally
+      Conn.Close;
+      Conn.Free;
+    end;
+  except
+    on E: Exception do
+    begin
+      if ALogger <> nil then
+        ALogger.Error('SQLite database validation failed (exception): ' + E.Message);
+      Result := False;
+    end;
+  end;
 end;
 
 { TBackupService }
@@ -128,7 +179,6 @@ var
   JsonText: string;
   Json: System.JSON.TJSONObject;
   TempDir: string;
-  Stream: TStringStream;
   I: Integer;
   Logger: ILogger;
   TagsArray: System.JSON.TJSONArray;
@@ -224,6 +274,19 @@ begin
     SettingsFile := TPath.Combine(TempDir, 'settings.ini');
     FSettings.SaveToFile(SettingsFile);
 
+    // Package SQLite database if present in AppData path
+    FileName := TPath.Combine(TPath.GetDirectoryName(ExpandFileName(FBackupPath)), 'vnotes.db');
+    if TFile.Exists(FileName) then
+    begin
+      if ValidateSQLiteDatabase(FileName, Logger) then
+      begin
+        TFile.Copy(FileName, TPath.Combine(TempDir, 'vnotes.db'), True);
+        Logger.Info('CreateBackupZip: Included valid vnotes.db in backup archive');
+      end
+      else
+        Logger.Warning('CreateBackupZip: vnotes.db found but quick_check validation failed - omitted from zip');
+    end;
+
     // Create manifest with version info
     if Assigned(FOnProgress) then
       FOnProgress('Creating manifest...', 70);
@@ -262,6 +325,16 @@ begin
   end;
 end;
 
+procedure DeleteDbSidecars(const ADbPath: string);
+begin
+  if TFile.Exists(ADbPath + '-wal') then
+    TFile.Delete(ADbPath + '-wal');
+  if TFile.Exists(ADbPath + '-shm') then
+    TFile.Delete(ADbPath + '-shm');
+  if TFile.Exists(ADbPath + '-journal') then
+    TFile.Delete(ADbPath + '-journal');
+end;
+
 procedure TBackupService.DoRestore(const ABackupFile: string; const ALogger: ILogger);
 var
   Zip: TZipFile;
@@ -288,6 +361,16 @@ var
   TextVal, DoneVal: System.JSON.TJSONValue;
   ItemText: string;
   ItemDone: Boolean;
+  TempDbFile: string;
+  AppDataPath: string;
+  AppDbPath: string;
+  BakDbPath: string;
+  SqlStorage: TSQLiteStorage;
+  SqlNotes: TObjectList<TNote>;
+  MigResult: TMigrationResult;
+  DbRestored: Boolean;
+  IsSQLiteActive: Boolean;
+  Val: System.JSON.TJSONValue;
 begin
   TempDir := TPath.Combine(TPath.GetTempPath, 'StickyNotes_Restore_' + FormatDateTime('yyyymmdd_hhnnss', Now));
   PreRestoreBackup := '';
@@ -345,33 +428,213 @@ begin
     if Assigned(FOnProgress) then
       FOnProgress('Validating backup contents...', 25);
 
-    // Phase 1: Load all notes from backup to temp list (validate all before applying)
-    ExtractPath := TPath.Combine(TempDir, 'notes');
-    if TDirectory.Exists(ExtractPath) then
+    DbRestored := False;
+    IsSQLiteActive := (FSettings <> nil) and SameText(FSettings.StorageBackend, 'SQLite') and FSettings.MigrationCompleted;
+
+    TempDbFile := TPath.Combine(TempDir, 'vnotes.db');
+    AppDataPath := TPath.GetDirectoryName(ExpandFileName(FBackupPath));
+    AppDbPath := TPath.Combine(AppDataPath, 'vnotes.db');
+
+    if IsSQLiteActive and TFile.Exists(TempDbFile) then
     begin
-      Files := TDirectory.GetFiles(ExtractPath, '*.json');
+      // SQLite Backup Archive: Validate TempDbFile before attempting restore
+      if not ValidateSQLiteDatabase(TempDbFile, ALogger) then
+      begin
+        ALogger.Error('Restore: SQLite database validation failed (quick_check)');
+        if Assigned(FOnComplete) then
+          FOnComplete(False, 'Restore failed: Corrupted SQLite database in backup');
+        Exit;
+      end;
+
+      // Load notes from SQLite DB in TempDir
+      SqlStorage := TSQLiteStorage.Create(TempDir);
+      try
+        SqlStorage.Initialize;
+        SqlNotes := SqlStorage.LoadAllNotes;
+        try
+          SqlNotes.OwnsObjects := False;
+          for I := 0 to SqlNotes.Count - 1 do
+          begin
+            RestoredNotes.Add(SqlNotes[I]);
+          end;
+        finally
+          SqlNotes.Free;
+        end;
+      finally
+        SqlStorage.Finalize;
+        SqlStorage.Free;
+      end;
+
+      // Safely replace AppDbPath with TempDbFile
+      if FNoteManager <> nil then
+        FNoteManager.Finalize;
+      try
+        if TFile.Exists(AppDbPath) then
+        begin
+          BakDbPath := AppDbPath + '.bak';
+          TFile.Copy(AppDbPath, BakDbPath, True);
+          try
+            DeleteDbSidecars(AppDbPath);
+            TFile.Copy(TempDbFile, AppDbPath, True);
+            TFile.Delete(BakDbPath);
+            DbRestored := True;
+          except
+            if TFile.Exists(BakDbPath) then
+            begin
+              DeleteDbSidecars(AppDbPath);
+              TFile.Copy(BakDbPath, AppDbPath, True);
+              TFile.Delete(BakDbPath);
+            end;
+            raise;
+          end;
+        end
+        else
+        begin
+          DeleteDbSidecars(AppDbPath);
+          TFile.Copy(TempDbFile, AppDbPath, True);
+          DbRestored := True;
+        end;
+      finally
+        if FNoteManager <> nil then
+          FNoteManager.Initialize;
+      end;
+    end;
+
+    if (RestoredNotes.Count = 0) and TDirectory.Exists(TempDir) then
+    begin
+      Files := TDirectory.GetFiles(TempDir, '*.json', TSearchOption.soAllDirectories);
       for FileName in Files do
       begin
+        if SameText(ExtractFileName(FileName), 'manifest.json') then
+          Continue;
+
         try
           JsonText := TFile.ReadAllText(FileName, TEncoding.UTF8);
           Json := System.JSON.TJSONObject.ParseJSONValue(JsonText) as System.JSON.TJSONObject;
           if Json <> nil then
           try
             Note := TNote.Create;
-            Note.ID := Json.GetValue<Int64>('ID', 0);
-            Note.Title := Json.GetValue<string>('Title', '');
-            Note.Content := Json.GetValue<string>('Content', '');
-            ColorInt := Json.GetValue<Integer>('Color', Ord(ncYellow));
+
+            // ID / id
+            Val := Json.GetValue('ID');
+            if Val = nil then Val := Json.GetValue('id');
+            if (Val <> nil) and (Val is TJSONNumber) then
+              Note.ID := (Val as TJSONNumber).AsInt64
+            else if Val <> nil then
+              Note.ID := StrToInt64Def(Val.Value, 0)
+            else
+              Note.ID := 0;
+
+            // Title / title
+            Val := Json.GetValue('Title');
+            if Val = nil then Val := Json.GetValue('title');
+            if (Val <> nil) and (Val is TJSONString) then
+              Note.Title := (Val as TJSONString).Value
+            else if Val <> nil then
+            begin
+              CreatedStr := Val.ToString;
+              if (Length(CreatedStr) >= 2) and (CreatedStr[1] = '"') and (CreatedStr[Length(CreatedStr)] = '"') then
+                Note.Title := Copy(CreatedStr, 2, Length(CreatedStr) - 2)
+              else
+                Note.Title := CreatedStr;
+            end
+            else
+              Note.Title := '';
+
+            // Content / content
+            Val := Json.GetValue('Content');
+            if Val = nil then Val := Json.GetValue('content');
+            if (Val <> nil) and (Val is TJSONString) then
+              Note.Content := (Val as TJSONString).Value
+            else if Val <> nil then
+            begin
+              CreatedStr := Val.ToString;
+              if (Length(CreatedStr) >= 2) and (CreatedStr[1] = '"') and (CreatedStr[Length(CreatedStr)] = '"') then
+                Note.Content := Copy(CreatedStr, 2, Length(CreatedStr) - 2)
+              else
+                Note.Content := CreatedStr;
+            end
+            else
+              Note.Content := '';
+
+            // Color / color
+            Val := Json.GetValue('Color');
+            if Val = nil then Val := Json.GetValue('color');
+            if (Val <> nil) and (Val is TJSONNumber) then
+              ColorInt := (Val as TJSONNumber).AsInt
+            else
+              ColorInt := Ord(ncYellow);
             Note.Color := TNoteColor(ColorInt);
-            Note.Left := Json.GetValue<Integer>('Left', 100);
-            Note.Top := Json.GetValue<Integer>('Top', 100);
-            Note.Width := Json.GetValue<Integer>('Width', 300);
-            Note.Height := Json.GetValue<Integer>('Height', 250);
-            Note.AlwaysOnTop := Json.GetValue<Boolean>('AlwaysOnTop', False);
-            Note.Collapsed := Json.GetValue<Boolean>('Collapsed', False);
-            Note.Locked := Json.GetValue<Boolean>('Locked', False);
-            CreatedStr := Json.GetValue<string>('CreatedAt', '');
-            UpdatedStr := Json.GetValue<string>('UpdatedAt', '');
+
+            // Left / left
+            Val := Json.GetValue('Left');
+            if Val = nil then Val := Json.GetValue('left');
+            if (Val <> nil) and (Val is TJSONNumber) then
+              Note.Left := (Val as TJSONNumber).AsInt
+            else
+              Note.Left := 100;
+
+            // Top / top
+            Val := Json.GetValue('Top');
+            if Val = nil then Val := Json.GetValue('top');
+            if (Val <> nil) and (Val is TJSONNumber) then
+              Note.Top := (Val as TJSONNumber).AsInt
+            else
+              Note.Top := 100;
+
+            // Width / width
+            Val := Json.GetValue('Width');
+            if Val = nil then Val := Json.GetValue('width');
+            if (Val <> nil) and (Val is TJSONNumber) then
+              Note.Width := (Val as TJSONNumber).AsInt
+            else
+              Note.Width := 300;
+
+            // Height / height
+            Val := Json.GetValue('Height');
+            if Val = nil then Val := Json.GetValue('height');
+            if (Val <> nil) and (Val is TJSONNumber) then
+              Note.Height := (Val as TJSONNumber).AsInt
+            else
+              Note.Height := 250;
+
+            // AlwaysOnTop / always_on_top
+            Val := Json.GetValue('AlwaysOnTop');
+            if Val = nil then Val := Json.GetValue('always_on_top');
+            Note.AlwaysOnTop := (Val <> nil) and (Val is TJSONTrue);
+
+            // Collapsed / collapsed
+            Val := Json.GetValue('Collapsed');
+            if Val = nil then Val := Json.GetValue('collapsed');
+            Note.Collapsed := (Val <> nil) and (Val is TJSONTrue);
+
+            // Locked / locked
+            Val := Json.GetValue('Locked');
+            if Val = nil then Val := Json.GetValue('locked');
+            Note.Locked := (Val <> nil) and (Val is TJSONTrue);
+
+            // CreatedAt / created_at
+            Val := Json.GetValue('CreatedAt');
+            if Val = nil then Val := Json.GetValue('created_at');
+            CreatedStr := '';
+            if Val <> nil then
+            begin
+              CreatedStr := Val.ToString;
+              if (Length(CreatedStr) >= 2) and (CreatedStr[1] = '"') and (CreatedStr[Length(CreatedStr)] = '"') then
+                CreatedStr := Copy(CreatedStr, 2, Length(CreatedStr) - 2);
+            end;
+
+            // UpdatedAt / updated_at
+            Val := Json.GetValue('UpdatedAt');
+            if Val = nil then Val := Json.GetValue('updated_at');
+            UpdatedStr := '';
+            if Val <> nil then
+            begin
+              UpdatedStr := Val.ToString;
+              if (Length(UpdatedStr) >= 2) and (UpdatedStr[1] = '"') and (UpdatedStr[Length(UpdatedStr)] = '"') then
+                UpdatedStr := Copy(UpdatedStr, 2, Length(UpdatedStr) - 2);
+            end;
+
             if CreatedStr <> '' then
               Note.CreatedAt := ISO8601ToDate(CreatedStr)
             else
@@ -381,14 +644,12 @@ begin
             else
               Note.UpdatedAt := Now;
 
-            // v3: Favorite (tolerant: missing/wrong-typed -> False)
-            FavoriteJsonVal := Json.GetValue('Favorite');
-            if (FavoriteJsonVal <> nil) and (FavoriteJsonVal is TJSONTrue) then
-              Note.Favorite := True
-            else
-              Note.Favorite := False;
+            // Favorite / favorite
+            Val := Json.GetValue('Favorite');
+            if Val = nil then Val := Json.GetValue('favorite');
+            Note.Favorite := (Val <> nil) and (Val is TJSONTrue);
 
-            // v3: tags (tolerant: missing/wrong-typed -> empty)
+            // tags
             TagsVal := Json.GetValue('tags');
             if (TagsVal <> nil) and (TagsVal is TJSONArray) then
             begin
@@ -396,10 +657,14 @@ begin
               SetLength(Tags, 0);
               for Elem in TagsArr do
               begin
-                if Elem is TJSONString then
+                if Elem <> nil then
                 begin
                   SetLength(Tags, Length(Tags) + 1);
-                  Tags[High(Tags)] := Elem.Value;
+                  CreatedStr := Elem.ToString;
+                  if (Length(CreatedStr) >= 2) and (CreatedStr[1] = '"') and (CreatedStr[Length(CreatedStr)] = '"') then
+                    Tags[High(Tags)] := Copy(CreatedStr, 2, Length(CreatedStr) - 2)
+                  else
+                    Tags[High(Tags)] := CreatedStr;
                 end;
               end;
               Note.Tags := Tags;
@@ -407,8 +672,9 @@ begin
             else
               Note.Tags := nil;
 
-            // v3: checklistItems (tolerant: missing/wrong-typed -> empty)
+            // checklistItems / checklist
             ChecklistVal := Json.GetValue('checklistItems');
+            if ChecklistVal = nil then ChecklistVal := Json.GetValue('checklist');
             if (ChecklistVal <> nil) and (ChecklistVal is TJSONArray) then
             begin
               ChecklistArr := ChecklistVal as TJSONArray;
@@ -420,8 +686,12 @@ begin
                   ItemObj := Elem as TJSONObject;
                   TextVal := ItemObj.GetValue('text');
                   DoneVal := ItemObj.GetValue('done');
-                  if (TextVal <> nil) and (TextVal is TJSONString) then
-                    ItemText := TextVal.Value
+                  if TextVal <> nil then
+                  begin
+                    ItemText := TextVal.ToString;
+                    if (Length(ItemText) >= 2) and (ItemText[1] = '"') and (ItemText[Length(ItemText)] = '"') then
+                      ItemText := Copy(ItemText, 2, Length(ItemText) - 2);
+                  end
                   else
                     ItemText := '';
                   ItemDone := (DoneVal <> nil) and (DoneVal is TJSONTrue);
@@ -447,30 +717,73 @@ begin
           end;
         end;
       end;
-    end;
 
-    // Phase 2: Clear existing notes and restore from validated temp list
-    if Assigned(FOnProgress) then
-      FOnProgress('Restoring notes...', 40);
-
-    // Delete all existing notes to make room for restored ones
-    for I := FNoteManager.NoteCount - 1 downto 0 do
-    begin
-      Note := FNoteManager.Notes[I];
-      if Note <> nil then
-        FNoteManager.DeleteNote(Note.ID);
-    end;
-
-    // Transfer ownership: note list must not own objects that have been
-    // accepted by TNoteManager (which has its own OwnsObjects=True list).
-    RestoredNotes.OwnsObjects := False;
-    for I := 0 to RestoredNotes.Count - 1 do
-    begin
-      Note := RestoredNotes[I];
-      if not FNoteManager.AddNote(Note) then
+      // Legacy JSON Backup Restore Compatibility: Migrate JSON notes to vnotes.db in TempDir if SQLite active
+      if IsSQLiteActive and (RestoredNotes.Count > 0) then
       begin
-        ALogger.Warning(Format('Restore: Failed to add note ID %d', [Note.ID]));
-        Note.Free;
+        MigResult := TStorageMigrationService.MigrateJsonToSQLite(TempDir);
+        if MigResult.Success and ValidateSQLiteDatabase(TempDbFile, ALogger) then
+        begin
+          if FNoteManager <> nil then
+            FNoteManager.Finalize;
+          try
+            if TFile.Exists(AppDbPath) then
+            begin
+              BakDbPath := AppDbPath + '.bak';
+              TFile.Copy(AppDbPath, BakDbPath, True);
+              try
+                DeleteDbSidecars(AppDbPath);
+                TFile.Copy(TempDbFile, AppDbPath, True);
+                TFile.Delete(BakDbPath);
+                DbRestored := True;
+              except
+                if TFile.Exists(BakDbPath) then
+                begin
+                  DeleteDbSidecars(AppDbPath);
+                  TFile.Copy(BakDbPath, AppDbPath, True);
+                  TFile.Delete(BakDbPath);
+                end;
+              end;
+            end
+            else
+            begin
+              DeleteDbSidecars(AppDbPath);
+              TFile.Copy(TempDbFile, AppDbPath, True);
+              DbRestored := True;
+            end;
+          finally
+            if FNoteManager <> nil then
+              FNoteManager.Initialize;
+          end;
+        end;
+      end;
+    end;
+
+    // Phase 2: Clear existing notes and restore from validated temp list (for non-DB restores)
+    if not DbRestored then
+    begin
+      if Assigned(FOnProgress) then
+        FOnProgress('Restoring notes...', 40);
+
+      // Delete all existing notes to make room for restored ones
+      for I := FNoteManager.NoteCount - 1 downto 0 do
+      begin
+        Note := FNoteManager.Notes[I];
+        if Note <> nil then
+          FNoteManager.DeleteNote(Note.ID);
+      end;
+
+      // Transfer ownership: note list must not own objects that have been
+      // accepted by TNoteManager (which has its own OwnsObjects=True list).
+      RestoredNotes.OwnsObjects := False;
+      for I := 0 to RestoredNotes.Count - 1 do
+      begin
+        Note := RestoredNotes[I];
+        if not FNoteManager.AddNote(Note) then
+        begin
+          ALogger.Warning(Format('Restore: Failed to add note ID %d', [Note.ID]));
+          Note.Free;
+        end;
       end;
     end;
 

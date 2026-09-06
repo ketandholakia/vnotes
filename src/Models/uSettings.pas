@@ -24,6 +24,9 @@ type
     FHotkeyNewNote: string;
     FHotkeySearch: string;
     FLastBackupAt: TDateTime;
+    FStorageBackend: string;
+    FMigrationCompleted: Boolean;
+    FMigrationTimestamp: string;
     procedure SetDefaults;
   public
     constructor Create;
@@ -45,6 +48,9 @@ type
     property HotkeyNewNote: string read FHotkeyNewNote write FHotkeyNewNote;
     property HotkeySearch: string read FHotkeySearch write FHotkeySearch;
     property LastBackupAt: TDateTime read FLastBackupAt write FLastBackupAt;
+    property StorageBackend: string read FStorageBackend write FStorageBackend;
+    property MigrationCompleted: Boolean read FMigrationCompleted write FMigrationCompleted;
+    property MigrationTimestamp: string read FMigrationTimestamp write FMigrationTimestamp;
   end;
 
 implementation
@@ -77,6 +83,9 @@ begin
   FHotkeyNewNote := 'Ctrl+Alt+N';
   FHotkeySearch := 'Ctrl+Alt+F';
   FLastBackupAt := 0;
+  FStorageBackend := 'JSON';
+  FMigrationCompleted := False;
+  FMigrationTimestamp := '';
 end;
 
 procedure TSettings.LoadFromFile(const AFileName: string);
@@ -103,6 +112,10 @@ begin
     FDarkTheme := Ini.ReadBool('Appearance', 'DarkTheme', FDarkTheme);
     FHotkeyNewNote := Ini.ReadString('Hotkeys', 'NewNote', FHotkeyNewNote);
     FHotkeySearch := Ini.ReadString('Hotkeys', 'Search', FHotkeySearch);
+
+    FStorageBackend := Ini.ReadString('Storage', 'Backend', FStorageBackend);
+    FMigrationCompleted := Ini.ReadBool('Storage', 'MigrationCompleted', FMigrationCompleted);
+    FMigrationTimestamp := Ini.ReadString('Storage', 'MigrationTimestamp', FMigrationTimestamp);
 
     LastBackupStr := Ini.ReadString('Backup', 'LastBackupAt', '');
     if LastBackupStr <> '' then
@@ -149,6 +162,10 @@ begin
     Ini.WriteBool('Appearance', 'DarkTheme', FDarkTheme);
     Ini.WriteString('Hotkeys', 'NewNote', FHotkeyNewNote);
     Ini.WriteString('Hotkeys', 'Search', FHotkeySearch);
+
+    Ini.WriteString('Storage', 'Backend', FStorageBackend);
+    Ini.WriteBool('Storage', 'MigrationCompleted', FMigrationCompleted);
+    Ini.WriteString('Storage', 'MigrationTimestamp', FMigrationTimestamp);
   finally
     Ini.Free;
   end;
@@ -172,6 +189,9 @@ begin
   FHotkeyNewNote := Source.FHotkeyNewNote;
   FHotkeySearch := Source.FHotkeySearch;
   FLastBackupAt := Source.FLastBackupAt;
+  FStorageBackend := Source.FStorageBackend;
+  FMigrationCompleted := Source.FMigrationCompleted;
+  FMigrationTimestamp := Source.FMigrationTimestamp;
 end;
 
 end.

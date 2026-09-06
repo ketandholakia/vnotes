@@ -153,6 +153,7 @@ begin
     FConnection.Params.Values['OpenMode'] := 'ReadWriteCreate';
     FConnection.Params.Values['LockingMode'] := 'Normal';
     FConnection.Params.Values['ForeignKeys'] := 'On';
+    FConnection.Params.Values['Pooled'] := 'False';
     FConnection.Open;
 
     InitDatabaseSchema;

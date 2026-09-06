@@ -286,24 +286,38 @@ begin
   Note := TNote.Create;
   try
     Val := AJson.GetValue('ID');
+    if Val = nil then Val := AJson.GetValue('id');
     if (Val <> nil) and (Val is TJSONNumber) then
       Note.ID := (Val as TJSONNumber).AsInt64
     else
       Note.ID := 0;
 
     Val := AJson.GetValue('Title');
+    if Val = nil then Val := AJson.GetValue('title');
     if (Val <> nil) then
-      Note.Title := Copy(Val.ToString, 2, Length(Val.ToString) - 2)
+    begin
+      if Val is TJSONString then
+        Note.Title := (Val as TJSONString).Value
+      else
+        Note.Title := Copy(Val.ToString, 2, Length(Val.ToString) - 2);
+    end
     else
       Note.Title := '';
 
     Val := AJson.GetValue('Content');
+    if Val = nil then Val := AJson.GetValue('content');
     if (Val <> nil) then
-      Note.Content := Copy(Val.ToString, 2, Length(Val.ToString) - 2)
+    begin
+      if Val is TJSONString then
+        Note.Content := (Val as TJSONString).Value
+      else
+        Note.Content := Copy(Val.ToString, 2, Length(Val.ToString) - 2);
+    end
     else
       Note.Content := '';
 
     Val := AJson.GetValue('Color');
+    if Val = nil then Val := AJson.GetValue('color');
     if (Val <> nil) and (Val is TJSONNumber) then
       ColorInt := (Val as TJSONNumber).AsInt
     else
@@ -311,30 +325,35 @@ begin
     Note.Color := TNoteColor(ColorInt);
 
     Val := AJson.GetValue('Left');
+    if Val = nil then Val := AJson.GetValue('left');
     if (Val <> nil) and (Val is TJSONNumber) then
       Note.Left := (Val as TJSONNumber).AsInt
     else
       Note.Left := 100;
 
     Val := AJson.GetValue('Top');
+    if Val = nil then Val := AJson.GetValue('top');
     if (Val <> nil) and (Val is TJSONNumber) then
       Note.Top := (Val as TJSONNumber).AsInt
     else
       Note.Top := 100;
 
     Val := AJson.GetValue('Width');
+    if Val = nil then Val := AJson.GetValue('width');
     if (Val <> nil) and (Val is TJSONNumber) then
       Note.Width := (Val as TJSONNumber).AsInt
     else
       Note.Width := 300;
 
     Val := AJson.GetValue('Height');
+    if Val = nil then Val := AJson.GetValue('height');
     if (Val <> nil) and (Val is TJSONNumber) then
       Note.Height := (Val as TJSONNumber).AsInt
     else
       Note.Height := 250;
 
     Val := AJson.GetValue('AlwaysOnTop');
+    if Val = nil then Val := AJson.GetValue('always_on_top');
     if (Val <> nil) and (Val is TJSONTrue) then
       Note.AlwaysOnTop := True
     else if (Val <> nil) and (Val is TJSONFalse) then
@@ -343,6 +362,7 @@ begin
       Note.AlwaysOnTop := False;
 
     Val := AJson.GetValue('Collapsed');
+    if Val = nil then Val := AJson.GetValue('collapsed');
     if (Val <> nil) and (Val is TJSONTrue) then
       Note.Collapsed := True
     else if (Val <> nil) and (Val is TJSONFalse) then
@@ -351,6 +371,7 @@ begin
       Note.Collapsed := False;
 
     Val := AJson.GetValue('Locked');
+    if Val = nil then Val := AJson.GetValue('locked');
     if (Val <> nil) and (Val is TJSONTrue) then
       Note.Locked := True
     else if (Val <> nil) and (Val is TJSONFalse) then
@@ -361,6 +382,7 @@ begin
     // Absent on v0/v1/v2 files (and wrong-typed anywhere) -> False,
     // same tolerant policy as the other boolean flags above.
     Val := AJson.GetValue('Favorite');
+    if Val = nil then Val := AJson.GetValue('favorite');
     if (Val <> nil) and (Val is TJSONTrue) then
       Note.Favorite := True
     else if (Val <> nil) and (Val is TJSONFalse) then
@@ -369,18 +391,30 @@ begin
       Note.Favorite := False;
 
     Val := AJson.GetValue('CreatedAt');
+    if Val = nil then Val := AJson.GetValue('created_at');
     CreatedStr := '';
     if (Val <> nil) then
-      CreatedStr := Val.Value;
+    begin
+      if Val is TJSONString then
+        CreatedStr := (Val as TJSONString).Value
+      else
+        CreatedStr := Val.Value;
+    end;
     if CreatedStr <> '' then
       Note.CreatedAt := System.DateUtils.ISO8601ToDate(CreatedStr)
     else
       Note.CreatedAt := Now;
 
     Val := AJson.GetValue('UpdatedAt');
+    if Val = nil then Val := AJson.GetValue('updated_at');
     UpdatedStr := '';
     if (Val <> nil) then
-      UpdatedStr := Val.Value;
+    begin
+      if Val is TJSONString then
+        UpdatedStr := (Val as TJSONString).Value
+      else
+        UpdatedStr := Val.Value;
+    end;
     if UpdatedStr <> '' then
       Note.UpdatedAt := System.DateUtils.ISO8601ToDate(UpdatedStr)
     else
