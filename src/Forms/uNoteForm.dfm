@@ -35,79 +35,109 @@ object NoteForm: TNoteForm
     OnMouseDown = pnlHeaderMouseDown
     OnMouseMove = pnlHeaderMouseMove
     OnMouseUp = pnlHeaderMouseUp
-    object btnClose: TButton
+    object btnClose: TSpeedButton
+      Left = 270
+      Top = 2
+      Width = 28
+      Height = 28
+      Caption = #59579
+      Flat = True
+      Font.Charset = DEFAULT_CHARSET
+      Font.Color = clWindowText
+      Font.Height = -16
+      Font.Name = 'Segoe MDL2 Assets'
+      Font.Style = []
+      ParentFont = False
+      OnClick = btnCloseClick
+    end
+    object btnChecklist: TSpeedButton
       Left = 240
       Top = 2
       Width = 28
       Height = 28
-      Caption = #215
+      Caption = #59198
+      Flat = True
       Font.Charset = DEFAULT_CHARSET
       Font.Color = clWindowText
       Font.Height = -16
-      Font.Name = 'Segoe UI'
+      Font.Name = 'Segoe MDL2 Assets'
       Font.Style = []
       ParentFont = False
-      TabOrder = 0
-      OnClick = btnCloseClick
-    end
-    object btnChecklist: TButton
-      Left = 272
-      Top = 2
-      Width = 28
-      Height = 28
-      Caption = #9745
-      Font.Charset = DEFAULT_CHARSET
-      Font.Color = clWindowText
-      Font.Height = -16
-      Font.Name = 'Segoe UI'
-      Font.Style = []
-      ParentFont = False
-      TabOrder = 1
       OnClick = btnChecklistClick
     end
-    object btnLock: TButton
-      Left = 208
+    object btnLock: TSpeedButton
+      Left = 210
       Top = 2
       Width = 28
       Height = 28
-      Caption = #62739
-      TabOrder = 2
+      Caption = #59269
+      Flat = True
+      Font.Charset = DEFAULT_CHARSET
+      Font.Color = clWindowText
+      Font.Height = -16
+      Font.Name = 'Segoe MDL2 Assets'
+      Font.Style = []
+      ParentFont = False
       OnClick = btnLockClick
     end
-    object btnCollapse: TButton
-      Left = 176
+    object btnCollapse: TSpeedButton
+      Left = 180
       Top = 2
       Width = 28
       Height = 28
-      Caption = #9633
-      TabOrder = 3
+      Caption = #59192
+      Flat = True
+      Font.Charset = DEFAULT_CHARSET
+      Font.Color = clWindowText
+      Font.Height = -16
+      Font.Name = 'Segoe MDL2 Assets'
+      Font.Style = []
+      ParentFont = False
       OnClick = btnCollapseClick
     end
-    object btnPin: TButton
-      Left = 144
+    object btnPin: TSpeedButton
+      Left = 150
       Top = 2
       Width = 28
       Height = 28
-      Caption = #62668
-      TabOrder = 4
+      Caption = #59160
+      Flat = True
+      Font.Charset = DEFAULT_CHARSET
+      Font.Color = clWindowText
+      Font.Height = -16
+      Font.Name = 'Segoe MDL2 Assets'
+      Font.Style = []
+      ParentFont = False
       OnClick = btnPinClick
     end
-    object btnColor: TButton
-      Left = 112
+    object btnColor: TSpeedButton
+      Left = 120
       Top = 2
       Width = 28
       Height = 28
-      Caption = #62382
-      TabOrder = 5
+      Caption = #58033
+      Flat = True
+      Font.Charset = DEFAULT_CHARSET
+      Font.Color = clWindowText
+      Font.Height = -16
+      Font.Name = 'Segoe MDL2 Assets'
+      Font.Style = []
+      ParentFont = False
       OnClick = btnColorClick
     end
-    object btnFavorite: TButton
-      Left = 80
+    object btnFavorite: TSpeedButton
+      Left = 90
       Top = 2
       Width = 28
       Height = 28
-      Caption = #9733
-      TabOrder = 6
+      Caption = #57619
+      Flat = True
+      Font.Charset = DEFAULT_CHARSET
+      Font.Color = clWindowText
+      Font.Height = -16
+      Font.Name = 'Segoe MDL2 Assets'
+      Font.Style = []
+      ParentFont = False
       OnClick = btnFavoriteClick
     end
   end
@@ -117,10 +147,15 @@ object NoteForm: TNoteForm
     Width = 300
     Height = 28
     Align = alTop
+    AlignWithMargins = True
+    Margins.Left = 10
+    Margins.Top = 0
+    Margins.Right = 10
+    Margins.Bottom = 0
     BorderStyle = bsNone
     Font.Charset = DEFAULT_CHARSET
     Font.Color = clWindowText
-    Font.Height = -13
+    Font.Height = -18
     Font.Name = 'Segoe UI'
     Font.Style = [fsBold]
     ParentFont = False
@@ -134,10 +169,15 @@ object NoteForm: TNoteForm
     Height = 170
     StyleElements = [seBorder]
     Align = alClient
+    AlignWithMargins = True
+    Margins.Left = 10
+    Margins.Top = 5
+    Margins.Right = 10
+    Margins.Bottom = 10
     BorderStyle = bsNone
     Font.Charset = DEFAULT_CHARSET
     Font.Color = clWindowText
-    Font.Height = -12
+    Font.Height = -13
     Font.Name = 'Segoe UI'
     Font.Style = []
     ParentFont = False
@@ -152,6 +192,11 @@ object NoteForm: TNoteForm
     Width = 300
     Height = 170
     Align = alClient
+    AlignWithMargins = True
+    Margins.Left = 10
+    Margins.Top = 5
+    Margins.Right = 10
+    Margins.Bottom = 10
     BevelOuter = bvNone
     BorderWidth = 4
     ParentBackground = False
@@ -204,6 +249,11 @@ object NoteForm: TNoteForm
     Width = 300
     Height = 24
     Align = alBottom
+    AlignWithMargins = True
+    Margins.Left = 10
+    Margins.Top = 0
+    Margins.Right = 10
+    Margins.Bottom = 10
     BevelOuter = bvNone
     ParentBackground = False
     TabOrder = 4

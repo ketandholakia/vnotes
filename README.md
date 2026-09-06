@@ -73,10 +73,16 @@ Each note is an independent JSON file - corruption affects only one note, easy t
 
 | Action | Default | Status |
 |--------|---------|--------|
-| New Note | `Ctrl+Alt+N` | Implemented |
-| Search Notes | `Ctrl+Alt+F` | Implemented - opens the Notes List (Title/Content search) and focuses the search box |
+| New Note | `Ctrl+Alt+N` | Implemented (Global) |
+| Search Notes | `Ctrl+Alt+F` | Implemented (Global) - opens the Notes List |
+| Favorite Note | `Ctrl+F` | Implemented (Note Window) |
+| Pin Note | `Ctrl+P` | Implemented (Note Window) |
+| Collapse Note | `Ctrl+M` | Implemented (Note Window) |
+| Lock Note | `Ctrl+L` | Implemented (Note Window) |
+| Toggle Checklist | `Ctrl+K` | Implemented (Note Window) |
+| Delete Note | `Ctrl+D` | Implemented (Note Window) |
 
-Configurable in Settings → Hotkeys.
+Configurable in Settings → Hotkeys (Global hotkeys only).
 
 ## Extending
 

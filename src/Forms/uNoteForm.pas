@@ -1,4 +1,4 @@
-﻿unit uNoteForm;
+unit uNoteForm;
 
 interface
 
@@ -6,29 +6,33 @@ uses
   Winapi.Windows, Winapi.Messages, System.SysUtils, System.Classes, System.Variants,
   System.Math,
   Vcl.Graphics, Vcl.Controls, Vcl.Forms, Vcl.Dialogs, Vcl.StdCtrls, Vcl.ExtCtrls,
-  Vcl.Menus, Vcl.ComCtrls,
+  Vcl.Menus, Vcl.ComCtrls, Vcl.Buttons,
   uNote, uNoteEditorContext, uEnums;
 
 type
   TNoteForm = class(TForm)
     pnlHeader: TPanel;
-    btnClose: TButton;
-    btnColor: TButton;
-    btnPin: TButton;
-    btnFavorite: TButton;
-    btnCollapse: TButton;
-    btnLock: TButton;
-    btnChecklist: TButton;
+    btnClose: TSpeedButton;
+    btnColor: TSpeedButton;
+    btnPin: TSpeedButton;
+    btnFavorite: TSpeedButton;
+    btnCollapse: TSpeedButton;
+    btnLock: TSpeedButton;
+    btnChecklist: TSpeedButton;
     edTitle: TEdit;
     mmContent: TMemo;
     pnlChecklist: TPanel;
     pnlChecklistItems: TPanel;
     pnlAddChecklist: TPanel;
     edAddChecklist: TEdit;
-    btnAddChecklist: TButton;
     pnlTagsFooter: TPanel;
     flwTags: TFlowPanel;
     edNewTag: TEdit;
+    
+    pnlMemoContainer: TPanel;
+    pnlCustomScrollbar: TPanel;
+    pnlThumb: TPanel;
+    FTimerScroll: TTimer;
     btnAddTag: TButton;
     pmNote: TPopupMenu;
     miNewNote: TMenuItem;
@@ -83,15 +87,20 @@ type
     procedure pnlHeaderMouseUp(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
     procedure FormKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
     procedure FormMouseWheel(Sender: TObject; Shift: TShiftState; WheelDelta: Integer; MousePos: TPoint; var Handled: Boolean);
+  protected
+    // 6E.2 resize fix: see CreateParams comment.
+    procedure CreateParams(var Params: TCreateParams); override;
+    // 6E.2 resize fix: hook dynamically created windowed children (checklist
+    // items, tag chips...) into the edge hit-test passthrough as they appear.
+    procedure Notification(AComponent: TComponent; Operation: TOperation); override;
   private
     FNote: TNote;
     FEditorContext: INoteEditorContext;
-    FDragMode: Boolean;
-    FDragOffset: TPoint;
     FCollapsedHeight: Integer;
     FIsClosing: Boolean;
     FOnClosed: TNotifyEvent;
     FForcingChecklistMode: Boolean;
+    FIsLoaded: Boolean;
     procedure LoadNote;
     procedure SaveNote;
     procedure ApplyColor;
@@ -99,29 +108,25 @@ type
     procedure UpdateFavoriteButton;
     procedure ApplyTheme;
     procedure WMNCHitTest(var Message: TWMNCHitTest); message WM_NCHITTEST;
-    procedure WMNCLButtonDown(var Message: TWMNCLButtonDown); message WM_NCLBUTTONDOWN;
     procedure WMGetMinMaxInfo(var Message: TWMGetMinMaxInfo); message WM_GETMINMAXINFO;
+    procedure WMExitSizeMove(var Message: TMessage); message WM_EXITSIZEMOVE;
     // Phase 6A Part 2: tag chip strip + checklist panel.
     procedure RefreshTagsFooter;
     procedure RefreshChecklistPanel;
     procedure UpdateContentMode;
-    procedure ToggleChecklistMode;  // memo vs checklist panel visibility
+    procedure ToggleChecklistMode;
     procedure HandleAddTagInput;
     procedure HandleAddChecklistInput;
     procedure ChecklistItemToggle(Sender: TObject);
     procedure ChecklistItemTextChange(Sender: TObject);
     procedure CreateTagChip(const ATag: string; AIndex: Integer);
     procedure RemoveTagChip(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
+    procedure MemoContainerResize(Sender: TObject);
+    procedure OnScrollTimer(Sender: TObject);
   public
     constructor CreateNote(AOwner: TComponent; ANote: TNote; const AContext: INoteEditorContext);
-    // Lets an owning form (e.g. TTrayForm) close this note window without
-    // triggering a re-save of a note that's already been deleted/is being
-    // torn down in bulk, without reaching into the private FIsClosing field.
     procedure CloseWithoutSaving;
-    procedure Save;  // Public wrapper for SaveNote
-    // Phase 6A Part 2: testability getters so the non-visual checklist logic
-    // can be exercised without firing VCL events. Read-only views of the
-    // current rows; row count == Length(FNote.ChecklistItems) at refresh time.
+    procedure Save;
     function ChecklistRowCount: Integer;
     function ChecklistRowText(AIndex: Integer): string;
     function ChecklistRowDone(AIndex: Integer): Boolean;
@@ -136,7 +141,6 @@ var
 implementation
 
 {$R *.dfm}
-
 
 uses
   Winapi.ShellAPI, uWindowUtils, uColorUtils, uMonitorUtils;
@@ -156,51 +160,110 @@ begin
   FCollapsedHeight := COLLAPSED_HEIGHT;
   FIsClosing := False;
   FForcingChecklistMode := False;
+  FIsLoaded := False;
 end;
 
 procedure TNoteForm.FormCreate(Sender: TObject);
 begin
   TWindowUtils.EnableBorderlessWindow(Self);
-  SetWindowLong(Handle, GWL_STYLE, GetWindowLong(Handle, GWL_STYLE) or WS_THICKFRAME);
-  SetWindowLong(Handle, GWL_EXSTYLE, GetWindowLong(Handle, GWL_EXSTYLE) or WS_EX_WINDOWEDGE);
-  SetWindowPos(Handle, 0, 0, 0, 0, 0, SWP_NOMOVE or SWP_NOSIZE or SWP_NOZORDER or SWP_FRAMECHANGED);
+  TWindowUtils.EnableRoundedCorners(Self);
+  edTitle.StyleElements := [];
+  pnlTagsFooter.StyleElements := [];
+  edNewTag.StyleElements := [];
+  pnlChecklist.StyleElements := [];
+  pnlAddChecklist.StyleElements := [];
+  edAddChecklist.StyleElements := [];
+  mmContent.StyleElements := [seBorder];
+  flwTags.StyleElements := [];
+  
+  pnlTagsFooter.ParentBackground := False;
+  pnlHeader.ParentBackground := False;
+  pnlChecklist.ParentBackground := False;
+  flwTags.ParentBackground := False;
+  
+  pnlMemoContainer := TPanel.Create(Self);
+  pnlMemoContainer.Parent := Self;
+  pnlMemoContainer.Align := alClient;
+  pnlMemoContainer.BevelOuter := bvNone;
+  pnlMemoContainer.ParentBackground := False;
+  pnlMemoContainer.StyleElements := [];
+  pnlMemoContainer.OnResize := MemoContainerResize;
+  
+  mmContent.Align := alNone;
+  mmContent.Parent := pnlMemoContainer;
+  mmContent.Anchors := [akLeft, akTop, akBottom];
+  
+  pnlCustomScrollbar := TPanel.Create(Self);
+  pnlCustomScrollbar.Parent := Self;
+  pnlCustomScrollbar.Align := alRight;
+  pnlCustomScrollbar.Width := 8;
+  pnlCustomScrollbar.BevelOuter := bvNone;
+  pnlCustomScrollbar.ParentBackground := False;
+  pnlCustomScrollbar.StyleElements := [];
+  
+  pnlThumb := TPanel.Create(Self);
+  pnlThumb.Parent := pnlCustomScrollbar;
+  pnlThumb.Width := 8;
+  pnlThumb.Left := 0;
+  pnlThumb.BevelOuter := bvNone;
+  pnlThumb.ParentBackground := False;
+  pnlThumb.StyleElements := [];
+  
+  FTimerScroll := TTimer.Create(Self);
+  FTimerScroll.Interval := 30;
+  FTimerScroll.OnTimer := OnScrollTimer;
   DoubleBuffered := True;
+  KeyPreview := True;
 
-  // Header panel setup
   pnlHeader.Height := TWindowUtils.GetCaptionHeight;
   pnlHeader.Align := alTop;
   pnlHeader.BevelOuter := bvNone;
   pnlHeader.ParentBackground := False;
 
-  // Buttons
   btnClose.Width := 28;
   btnClose.Height := 28;
-  btnClose.Caption := '×';
-  btnClose.Font.Size := 16;
+  btnClose.Caption := #$E8BB;
+  btnClose.Font.Size := 12;
+  btnClose.Font.Name := 'Segoe MDL2 Assets';
 
   btnColor.Width := 28;
   btnColor.Height := 28;
-  btnColor.Caption := '🎨';
+  btnColor.Caption := #$E2B1;
+  btnColor.Font.Size := 12;
+  btnColor.Font.Name := 'Segoe MDL2 Assets';
 
   btnPin.Width := 28;
   btnPin.Height := 28;
-  btnPin.Caption := '📌';
+  btnPin.Caption := #$E718;
+  btnPin.Font.Size := 12;
+  btnPin.Font.Name := 'Segoe MDL2 Assets';
 
   btnCollapse.Width := 28;
   btnCollapse.Height := 28;
-  btnCollapse.Caption := '□';
+  btnCollapse.Caption := #$E738;
+  btnCollapse.Font.Size := 12;
+  btnCollapse.Font.Name := 'Segoe MDL2 Assets';
 
   btnLock.Width := 28;
   btnLock.Height := 28;
-  btnLock.Caption := '🔓';
+  btnLock.Caption := #$E785;
+  btnLock.Font.Size := 12;
+  btnLock.Font.Name := 'Segoe MDL2 Assets';
 
   btnChecklist.Width := 28;
   btnChecklist.Height := 28;
-  btnChecklist.Caption := '☑';
+  btnChecklist.Caption := #$E73E;
+  btnChecklist.Font.Size := 12;
+  btnChecklist.Font.Name := 'Segoe MDL2 Assets';
   btnChecklist.Hint := 'Checklist';
   btnChecklist.ShowHint := True;
+  
+  btnFavorite.Width := 28;
+  btnFavorite.Height := 28;
+  btnFavorite.Caption := #$E113;
+  btnFavorite.Font.Size := 12;
+  btnFavorite.Font.Name := 'Segoe MDL2 Assets';
 
-  // Title editor
   edTitle.Align := alTop;
   edTitle.Height := 28;
   edTitle.BorderStyle := bsNone;
@@ -209,7 +272,6 @@ begin
   edTitle.Font.Style := [fsBold];
   edTitle.ParentFont := False;
 
-  // Content memo
   mmContent.Align := alClient;
   mmContent.BorderStyle := bsNone;
   mmContent.ScrollBars := ssVertical;
@@ -217,7 +279,6 @@ begin
   mmContent.Font.Name := 'Segoe UI';
   mmContent.Font.Size := 10;
 
-  // Popup menu
   miYellow.Tag := Ord(ncYellow);
   miGreen.Tag := Ord(ncGreen);
   miBlue.Tag := Ord(ncBlue);
@@ -231,6 +292,16 @@ begin
 
   LoadNote;
   ApplyTheme;
+
+  TEdgeHitTestHook.Install(Self);
+end;
+
+procedure TNoteForm.Notification(AComponent: TComponent; Operation: TOperation);
+begin
+  inherited;
+  if (Operation = opInsert) and not (csLoading in ComponentState) and
+     (AComponent is TWinControl) and (AComponent <> Self) and not (csDestroying in ComponentState) then
+    TEdgeHitTestHook.InstallControl(Self, TWinControl(AComponent));
 end;
 
 procedure TNoteForm.CloseWithoutSaving;
@@ -255,23 +326,12 @@ var
   Desired: TRect;
   Clamped: TRect;
 begin
-  // Phase 4C: if the note's persisted position lies completely outside
-  // every connected monitor's work area (e.g. monitor was disconnected,
-  // resolution changed, or the note was saved on a now-removed display),
-  // move it into the nearest monitor. Positions that are still visible
-  // are left alone. The clamp preserves size and only nudges origin.
   Desired := Rect(FNote.Left, FNote.Top,
                   FNote.Left + FNote.Width, FNote.Top + FNote.Height);
   if TMonitorUtils.EnsureNoteRectVisible(Desired, Clamped) then
     SetBounds(FNote.Left, FNote.Top, FNote.Width, FNote.Height)
   else
   begin
-    // Clamped position was changed; persist the new coordinates so the
-    // note does not "drift back" to the inaccessible spot on the next
-    // launch. (Phase 4E: the persist comment is now true - the corrected
-    // coordinates are written through the editor context immediately.
-    // Locked notes are included: position repair must work even when
-    // content editing is locked. Only fires when clamping occurred.)
     FNote.Left := Clamped.Left;
     FNote.Top := Clamped.Top;
     SetBounds(Clamped.Left, Clamped.Top, FNote.Width, FNote.Height);
@@ -286,6 +346,7 @@ begin
     btnCollapse.Caption := '▣';
   end;
   UpdateUI;
+  FIsLoaded := True;
 end;
 
 procedure TNoteForm.FormClose(Sender: TObject; var Action: TCloseAction);
@@ -300,6 +361,7 @@ end;
 
 procedure TNoteForm.FormResize(Sender: TObject);
 begin
+  if not FIsLoaded then Exit;
   if not FNote.Collapsed then
   begin
     FNote.Width := Width;
@@ -322,7 +384,6 @@ begin
   edTitle.ReadOnly := FNote.Locked;
   UpdateUI;
 
-  // Phase 6A Part 2: Load tags and checklist
   RefreshTagsFooter;
   RefreshChecklistPanel;
 end;
@@ -351,21 +412,45 @@ end;
 
 procedure TNoteForm.ApplyColor;
 var
-  C: TColor;
+  C, FrameColor, ContentColor, TitleColor: TColor;
 begin
   C := FEditorContext.GetNoteColor(FNote.Color);
-  Color := C;
-  pnlHeader.Color := TColorUtils.DarkenColor(C, 20);
-  mmContent.Color := C;
+  
+  FrameColor := TColorUtils.AdjustBrightness(C, -15);
+  TitleColor := C;
+  ContentColor := TColorUtils.AdjustBrightness(C, 15);
+
+  Color := FrameColor;
+  
+  pnlHeader.Color := FrameColor;
+  pnlTagsFooter.Color := FrameColor;
+  flwTags.Color := FrameColor;
+  pnlCustomScrollbar.Color := FrameColor;
+  pnlThumb.Color := TColorUtils.AdjustBrightness(ContentColor, -30);
+  pnlMemoContainer.Color := ContentColor;
+  
+  mmContent.Color := ContentColor;
   mmContent.Font.Color := FEditorContext.GetNoteTextColor(FNote.Color);
-  edTitle.Color := TColorUtils.AdjustBrightness(C, -8);
+  
+  edTitle.Color := TitleColor;
   edTitle.Font.Color := mmContent.Font.Color;
+
+  pnlChecklist.Color := ContentColor;
+  pnlChecklistItems.Color := ContentColor;
+  pnlAddChecklist.Color := ContentColor;
+  edAddChecklist.Color := ContentColor;
+  edAddChecklist.Font.Color := mmContent.Font.Color;
+
+  edNewTag.Color := TitleColor;
+  edNewTag.Font.Color := mmContent.Font.Color;
 
   btnClose.Font.Color := mmContent.Font.Color;
   btnColor.Font.Color := mmContent.Font.Color;
   btnPin.Font.Color := mmContent.Font.Color;
   btnCollapse.Font.Color := mmContent.Font.Color;
   btnLock.Font.Color := mmContent.Font.Color;
+  btnFavorite.Font.Color := mmContent.Font.Color;
+  btnChecklist.Font.Color := mmContent.Font.Color;
 end;
 
 procedure TNoteForm.UpdateUI;
@@ -374,8 +459,6 @@ begin
   btnCollapse.Enabled := not FNote.Locked;
   btnLock.Enabled := True;
   btnColor.Enabled := not FNote.Locked;
-  // Phase 6C.2: Favorite follows the same locked policy as the other
-  // header toggles (disabled control + silent no-op in the handler).
   btnFavorite.Enabled := not FNote.Locked;
   UpdateFavoriteButton;
 
@@ -383,7 +466,6 @@ begin
   miLock.Checked := FNote.Locked;
   miCollapse.Checked := FNote.Collapsed;
 
-  // Update color menu checks
   miYellow.Checked := FNote.Color = ncYellow;
   miGreen.Checked := FNote.Color = ncGreen;
   miBlue.Checked := FNote.Color = ncBlue;
@@ -394,24 +476,22 @@ begin
   miGray.Checked := FNote.Color = ncGray;
 
   if FNote.Locked then
-    btnLock.Caption := '🔒'
+    btnLock.Caption := #$E72E
   else
-    btnLock.Caption := '🔓';
+    btnLock.Caption := #$E785;
 
   if FNote.Collapsed then
-    btnCollapse.Caption := '▣'
+    btnCollapse.Caption := #$E73F
   else
-    btnCollapse.Caption := '□';
+    btnCollapse.Caption := #$E738;
 end;
 
-// Phase 6C.2: ★ filled = Favorite, ☆ outline = not. Same caption-swap
-// pattern as btnLock/btnCollapse above.
 procedure TNoteForm.UpdateFavoriteButton;
 begin
   if FNote.Favorite then
-    btnFavorite.Caption := '★'
+    btnFavorite.Caption := #$E734
   else
-    btnFavorite.Caption := '☆';
+    btnFavorite.Caption := #$E113;
 end;
 
 procedure TNoteForm.ApplyTheme;
@@ -441,9 +521,6 @@ begin
   UpdateUI;
 end;
 
-// Phase 6C.2: Favorite toggle. Mirrors the tag handlers: model mutation,
-// immediate caption refresh, then the debounced autosave path (which
-// persists via TNoteManager.SaveNote and Touches UpdatedAt there).
 procedure TNoteForm.btnFavoriteClick(Sender: TObject);
 begin
   if FNote.Locked then Exit;
@@ -592,7 +669,6 @@ end;
 
 procedure TNoteForm.miPropertiesClick(Sender: TObject);
 begin
-  // Show properties dialog
   ShowMessage(Format('Note ID: %d'#13#10'Created: %s'#13#10'Modified: %s',
     [FNote.ID, DateTimeToStr(FNote.CreatedAt), DateTimeToStr(FNote.UpdatedAt)]));
 end;
@@ -606,39 +682,64 @@ procedure TNoteForm.pnlHeaderMouseDown(Sender: TObject; Button: TMouseButton; Sh
 begin
   if (Button = mbLeft) and (Y < TWindowUtils.GetCaptionHeight) and not FNote.Locked then
   begin
-    FDragMode := True;
-    FDragOffset := Point(X, Y);
+    ReleaseCapture;
+    SendMessage(Handle, WM_NCLBUTTONDOWN, HTCAPTION, 0);
   end;
 end;
 
 procedure TNoteForm.pnlHeaderMouseMove(Sender: TObject; Shift: TShiftState; X, Y: Integer);
 begin
-  if FDragMode and (ssLeft in Shift) and not FNote.Locked then
-  begin
-    Left := Left + (X - FDragOffset.X);
-    Top := Top + (Y - FDragOffset.Y);
-    FNote.Left := Left;
-    FNote.Top := Top;
-    FEditorContext.ScheduleSave(FNote);
-  end;
 end;
 
 procedure TNoteForm.pnlHeaderMouseUp(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
 begin
-  FDragMode := False;
 end;
 
 procedure TNoteForm.FormKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
 begin
   if (Key = VK_F4) and (ssAlt in Shift) then
-    Close;
+    Close
+  else if (ssCtrl in Shift) and not (ssAlt in Shift) and not (ssShift in Shift) then
+  begin
+    case Key of
+      Ord('F'): 
+        begin
+          btnFavoriteClick(nil);
+          Key := 0;
+        end;
+      Ord('P'): 
+        begin
+          btnPinClick(nil);
+          Key := 0;
+        end;
+      Ord('M'): 
+        begin
+          btnCollapseClick(nil);
+          Key := 0;
+        end;
+      Ord('L'): 
+        begin
+          btnLockClick(nil);
+          Key := 0;
+        end;
+      Ord('K'): 
+        begin
+          btnChecklistClick(nil);
+          Key := 0;
+        end;
+      Ord('D'): 
+        begin
+          miDeleteClick(nil);
+          Key := 0;
+        end;
+    end;
+  end;
 end;
 
 procedure TNoteForm.FormMouseWheel(Sender: TObject; Shift: TShiftState; WheelDelta: Integer; MousePos: TPoint; var Handled: Boolean);
 begin
   if ssCtrl in Shift then
   begin
-    // Ctrl+Wheel to change font size
     mmContent.Font.Size := Max(8, Min(24, mmContent.Font.Size + WheelDelta div 120));
     Handled := True;
   end;
@@ -649,19 +750,10 @@ begin
   TWindowUtils.HandleNCHitTest(Self, Message);
 end;
 
-procedure TNoteForm.WMNCLButtonDown(var Message: TWMNCLButtonDown);
-var
-  HitTest: Integer;
+procedure TNoteForm.CreateParams(var Params: TCreateParams);
 begin
-  HitTest := Message.HitTest;
-  if (HitTest in [HTLEFT, HTRIGHT, HTTOP, HTBOTTOM,
-                  HTTOPLEFT, HTTOPRIGHT, HTBOTTOMLEFT, HTBOTTOMRIGHT]) then
-  begin
-    DefWindowProc(Handle, WM_SYSCOMMAND, SC_SIZE + HitTest, 0);
-    Message.Result := 0;
-    Exit;
-  end;
   inherited;
+  Params.Style := Params.Style or WS_THICKFRAME;
 end;
 
 procedure TNoteForm.WMGetMinMaxInfo(var Message: TWMGetMinMaxInfo);
@@ -671,7 +763,18 @@ begin
   Message.MinMaxInfo.ptMinTrackSize.Y := MIN_HEIGHT;
 end;
 
-// Phase 6A Part 2: Tag Management Implementation
+procedure TNoteForm.WMExitSizeMove(var Message: TMessage);
+begin
+  inherited;
+  if not FNote.Collapsed then
+  begin
+    FNote.Width := Width;
+    FNote.Height := Height;
+  end;
+  FNote.Left := Left;
+  FNote.Top := Top;
+  FEditorContext.ScheduleSave(FNote);
+end;
 
 procedure TNoteForm.RefreshTagsFooter;
 var
@@ -686,9 +789,6 @@ begin
     Tag := FNote.Tags[I];
     CreateTagChip(Tag, I);
   end;
-
-  // The footer (tag chips + "+ tag" input) must stay visible even when the
-  // note has no tags yet - hiding it would make the first tag un-addable.
 end;
 
 procedure TNoteForm.CreateTagChip(const ATag: string; AIndex: Integer);
@@ -706,6 +806,7 @@ begin
   pnlTag.OnMouseDown := RemoveTagChip;
   pnlTag.Cursor := crHandPoint;
   pnlTag.Height := 22;
+  pnlTag.Color := pnlTagsFooter.Color;
 
   lblTag := TLabel.Create(Self);
   lblTag.Parent := pnlTag;
@@ -760,7 +861,7 @@ begin
   if Key = VK_RETURN then
   begin
     HandleAddTagInput;
-    Key := 0; // Prevent default beep
+    Key := 0;
   end
   else if Key = VK_ESCAPE then
   begin
@@ -786,8 +887,6 @@ begin
     edNewTag.Text := '';
   end;
 end;
-
-// Phase 6A Part 2: Checklist Implementation
 
 procedure TNoteForm.RefreshChecklistPanel;
 var
@@ -832,7 +931,6 @@ begin
     edtText.Tag := I;
   end;
 
-  // Update checklist visibility
   pnlChecklist.Visible := Length(FNote.ChecklistItems) > 0;
   UpdateContentMode;
 end;
@@ -847,7 +945,7 @@ begin
   if Key = VK_RETURN then
   begin
     HandleAddChecklistInput;
-    Key := 0; // Prevent default beep
+    Key := 0;
   end
   else if Key = VK_ESCAPE then
   begin
@@ -899,7 +997,6 @@ end;
 
 procedure TNoteForm.UpdateContentMode;
 begin
-  // If checklist is visible and has items, hide memo and show checklist
   if pnlChecklist.Visible and (Length(FNote.ChecklistItems) > 0) then
   begin
     mmContent.Visible := False;
@@ -911,8 +1008,6 @@ begin
     pnlChecklist.Visible := False;
   end;
 end;
-
-// Phase 6A Part 2: Testability Getters
 
 function TNoteForm.ChecklistRowCount: Integer;
 begin
@@ -938,6 +1033,42 @@ end;
 function TNoteForm.IsChecklistPanelVisible: Boolean;
 begin
   Result := pnlChecklist.Visible;
+end;
+
+procedure TNoteForm.MemoContainerResize(Sender: TObject);
+begin
+  if Assigned(mmContent) and Assigned(pnlMemoContainer) then
+  begin
+    mmContent.Height := pnlMemoContainer.Height;
+    mmContent.Width := pnlMemoContainer.Width + 30; // Push native scrollbar completely out of view
+  end;
+end;
+
+procedure TNoteForm.OnScrollTimer(Sender: TObject);
+var
+  SI: TScrollInfo;
+  ThumbHeight: Integer;
+begin
+  if not Assigned(mmContent) or not mmContent.HandleAllocated then Exit;
+  
+  SI.cbSize := SizeOf(SI);
+  SI.fMask := SIF_ALL;
+  if GetScrollInfo(mmContent.Handle, SB_VERT, SI) then
+  begin
+    if (SI.nMax = 0) or (SI.nPage >= Cardinal(SI.nMax)) then
+    begin
+      pnlThumb.Visible := False;
+    end
+    else
+    begin
+      pnlThumb.Visible := True;
+      ThumbHeight := Max(20, Round(pnlCustomScrollbar.Height * (SI.nPage / (SI.nMax + 1))));
+      pnlThumb.Height := ThumbHeight;
+      pnlThumb.Top := Round((pnlCustomScrollbar.Height - ThumbHeight) * (SI.nPos / (SI.nMax - SI.nPage + 1)));
+    end;
+  end
+  else
+    pnlThumb.Visible := False;
 end;
 
 end.
