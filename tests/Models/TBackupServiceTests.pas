@@ -71,6 +71,10 @@ type
     procedure TestRestoreLegacy13FieldBackupDefaultsNewFields;
     [Test]
     procedure TestOnNoteDeletedFiresWhileNoteAlive;
+    [Test]
+    procedure TestRestoreSkipsMalformedJsonEntryInValidZip;
+    [Test]
+    procedure TestBackupRoundTripPreservesTagOrderAndCasing;
   end;
 
 implementation
@@ -818,6 +822,123 @@ begin
   Assert.IsTrue(FDeletedNoteWasAlive, 'OnNoteDeleted should fire while note is still alive');
   Assert.AreEqual('ToBeDeleted', FDeletedNoteTitle, 'OnNoteDeleted should receive correct note data');
   Assert.AreEqual(0, FNoteManager.NoteCount, 'Note should be removed from manager');
+end;
+
+procedure TBackupServiceTestFixture.TestRestoreSkipsMalformedJsonEntryInValidZip;
+// Step 3.4 precision: a valid ZIP containing one good note JSON and one
+// malformed JSON note — the good note must be restored; the bad entry must
+// be silently skipped without failing the whole restore.
+var
+  BackupFile: string;
+  Zip: TZipFile;
+  TempDir: string;
+  GoodNoteFile, BadNoteFile: string;
+  Note: TNote;
+begin
+  TempDir := TPath.Combine(TPath.GetTempPath, 'MalformedEntryTest_' + IntToStr(TThread.GetTickCount));
+  try
+    ForceDirectories(TPath.Combine(TempDir, 'notes'));
+
+    // Good note — minimal valid v3 JSON
+    GoodNoteFile := TPath.Combine(TempDir, 'notes', '0000000042.json');
+    TFile.WriteAllText(GoodNoteFile,
+      '{"schemaVersion":3,"ID":42,"Title":"Survived","Content":"ok",' +
+      '"Color":0,"Left":10,"Top":10,"Width":300,"Height":250,' +
+      '"AlwaysOnTop":false,"Collapsed":false,"Locked":false,' +
+      '"Favorite":false,"tags":[],"checklistItems":[],' +
+      '"CreatedAt":"2024-01-01T00:00:00","UpdatedAt":"2024-01-01T00:00:00"}',
+      TEncoding.UTF8);
+
+    // Bad note — invalid JSON (truncated/unparseable)
+    BadNoteFile := TPath.Combine(TempDir, 'notes', '0000000099.json');
+    TFile.WriteAllText(BadNoteFile, '{ this is not valid JSON !!!', TEncoding.UTF8);
+
+    BackupFile := TPath.Combine(FBackupPath, 'malformed_entry.zip');
+    Zip := TZipFile.Create;
+    try
+      Zip.Open(BackupFile, zmWrite);
+      try
+        Zip.Add(GoodNoteFile, 'notes/0000000042.json');
+        Zip.Add(BadNoteFile,  'notes/0000000099.json');
+      finally
+        Zip.Close;
+      end;
+    finally
+      Zip.Free;
+    end;
+
+    FBackupService.Restore(BackupFile);
+    Assert.AreEqual(1, FRestoreCount, 'Restore should complete (not abort on bad entry)');
+
+    // The good note survives; the bad one is silently skipped
+    Assert.AreEqual(1, FNoteManager.NoteCount, 'Should restore exactly the one valid note');
+    Note := FNoteManager.Notes[0];
+    Assert.AreEqual('Survived', Note.Title, 'Good note title should be restored');
+    Assert.AreEqual<Int64>(42, Note.ID, 'Good note ID should be restored correctly');
+  finally
+    if TDirectory.Exists(TempDir) then
+      TDirectory.Delete(TempDir, True);
+  end;
+end;
+
+procedure TBackupServiceTestFixture.TestBackupRoundTripPreservesTagOrderAndCasing;
+// Step 3.1 precision: tags must survive round-trip with their exact index
+// order and original casing (not just membership via HasTag).
+// checklistItems order and done-flag are also pinned here.
+var
+  BackupFile: string;
+  Note: TNote;
+  Tags: TArray<string>;
+  Items: TArray<TChecklistItem>;
+begin
+  Note := TNote.Create;
+  try
+    Note.ID := 77;
+    // Deliberately mixed-case and lowercase to confirm casing is preserved
+    Note.AddTag('Alpha');    // index 0
+    Note.AddTag('beta');     // index 1
+    Note.AddTag('GAMMA');    // index 2
+    Note.AddChecklistItem('Step One',   False);  // index 0, not done
+    Note.AddChecklistItem('Step Two',   True);   // index 1, done
+    Note.AddChecklistItem('Step Three', False);  // index 2, not done
+    Note.Favorite := True;
+    FNoteManager.AddNote(Note);
+  finally
+    // Note is now owned by manager
+  end;
+
+  FBackupService.Backup;
+  Assert.AreEqual(1, FBackupCount, 'Backup must complete');
+
+  while FNoteManager.NoteCount > 0 do
+    FNoteManager.DeleteNote(FNoteManager.Notes[0].ID);
+
+  BackupFile := FBackupService.GetBackupFileName;
+  FBackupService.Restore(BackupFile);
+  Assert.AreEqual(1, FRestoreCount, 'Restore must complete');
+
+  Assert.AreEqual(1, FNoteManager.NoteCount, 'Should have exactly one restored note');
+  Note := FNoteManager.Notes[0];
+
+  // Tags: exact count, exact order, exact casing
+  Tags := Note.Tags;
+  Assert.AreEqual(3, Length(Tags), 'Tag count must be 3');
+  Assert.AreEqual('Alpha', Tags[0], 'Tag[0] must preserve casing');
+  Assert.AreEqual('beta',  Tags[1], 'Tag[1] must preserve casing');
+  Assert.AreEqual('GAMMA', Tags[2], 'Tag[2] must preserve casing');
+
+  // Checklist: exact count, exact order, exact text and done-flag
+  Items := Note.ChecklistItems;
+  Assert.AreEqual(3, Length(Items), 'Checklist count must be 3');
+  Assert.AreEqual('Step One',   Items[0].Text, 'Checklist[0] text');
+  Assert.IsFalse(Items[0].Done,               'Checklist[0] must not be done');
+  Assert.AreEqual('Step Two',   Items[1].Text, 'Checklist[1] text');
+  Assert.IsTrue(Items[1].Done,                'Checklist[1] must be done');
+  Assert.AreEqual('Step Three', Items[2].Text, 'Checklist[2] text');
+  Assert.IsFalse(Items[2].Done,               'Checklist[2] must not be done');
+
+  // Favorite
+  Assert.IsTrue(Note.Favorite, 'Favorite must survive round-trip');
 end;
 
 initialization
