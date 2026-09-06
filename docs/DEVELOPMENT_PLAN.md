@@ -785,5 +785,110 @@ The above entry was drafted from a review of the in-tree diff without a local co
 
 ---
 
+## Phase 6D — Backup / Restore Foundation — COMPLETE + CLOSED (2026-09-05)
+
+> **Status:** **COMPLETE + CLOSED** — `TBackupService` restore path hardened; known schema-coverage gap documented; 127/127 tests PASS; all builds green. No new tests required for the hardening changes (existing `TBackupServiceTests` suite covers the restore path). Manual GUI smoke: **user-verified**.
+
+### What Changed
+
+- [x] **`TBackupService` restore path hardened** — restore now flushes the autosave queue before overwriting note files, preventing a race where an in-flight autosave write could land on top of the just-restored file. `TAutosaveService.Flush` is called synchronously inside `DoRestore` before any file I/O begins.
+- [x] **Known schema-coverage gap documented** — `TBackupService` uses its own legacy note serializer (no `schemaVersion`, no tags/checklistItems, no `favorite` field): a backup → restore round-trip drops all Phase 6A/6C fields. This is a pre-existing issue since Phase 6A, not a 6D regression. A future phase will update the backup format to use `TJsonStorage` serialization directly. Documented explicitly so it is not mistaken for shipped behavior.
+- [x] **No new source files** — hardening is a targeted edit to `uBackupService.pas` only; no new units, no `.dproj` changes, no schema changes.
+
+### Validation Results (2026-09-05)
+
+| # | Check | Result |
+|---|-------|--------|
+| 1 | `build.bat` (Win32 Debug, dcc32 v36.0) | **PASS** — 0 errors (pre-existing hints only) |
+| 2 | `build_tests.bat` + run | **PASS** — **127 Found / 127 Passed / 0 Failed / 0 Errored / 0 Leaked** |
+| 3 | `git diff --check` | **PASS** |
+| 4 | Manual GUI smoke | **PASS — user-verified** |
+
+### Files Changed During Phase 6D
+
+| File | Change |
+|------|--------|
+| `src/Services/uBackupService.pas` | `DoRestore` calls `FAutosaveService.Flush` before file I/O; schema-gap comment added |
+| `docs/DEVELOPMENT_PLAN.md` | This Phase 6D entry |
+
+### Known Issue (Carry-forward to a Future Phase)
+
+- **Backup/restore schema gap** — `TBackupService` serializes and deserializes notes using a hardcoded legacy field set (no `schemaVersion`, no `tags`, no `checklistItems`, no `favorite`). A backup taken after Phase 6A/6C changes will restore notes without those fields. Fix: replace the backup serializer with a direct call to `TJsonStorage.NoteToJson` / `JsonToNote`. Deferred; tracked here for future reference.
+
+---
+
+## Phase 6E — Title Editor + Resize / Visual Polish — COMPLETE + CLOSED (2026-09-06)
+
+> **Status:** **COMPLETE + CLOSED** — Phase 6E.1 (title editor) + Phase 6E.2 (resize/visual polish + note position persistence) fully implemented and validated. **146/146 tests PASS** (0 Failed / 0 Errored / 0 Leaked). Build: 0 errors. Manual GUI smoke: **user-verified (position persistence working)**.
+
+### Phase 6E.1 — Title Editor
+
+- [x] **`edTitle` promoted to a real `TEdit`** — the note title is now a proper bordered edit control with `alTop` alignment, bold `Segoe UI 11pt` font, and `bsNone` border so it blends with the note background color. Previously it was a caption-style label with no keyboard focus.
+- [x] **`edTitleChange` handler** — fires `FEditorContext.ScheduleSave(FNote)` on every keystroke, so title changes are autosaved with the standard 1-second debounce.
+- [x] **Locked-note guard** — `edTitle.ReadOnly := FNote.Locked` mirrors the existing `mmContent` behavior.
+
+### Phase 6E.2 — Resize / Visual Polish
+
+#### Resize Infrastructure
+
+- [x] **`TEdgeHitTestHook`** (`src/Utils/uWindowUtils.pas`, new class) — installs a `WindowProc` hook on every windowed child control of `TNoteForm`. When `WM_NCHITTEST` fires inside the 8px resize band (`RESIZE_BORDER = 8`), the hook returns `HTTRANSPARENT`, causing the hit to fall through to the form's own `WM_NCHITTEST` handler, which returns the correct `HT*` sizing code. Controls are tracked in a class-level `TDictionary<TWinControl, TEdgeHitTestHook>` and detach cleanly on destruction via `FreeNotification`.
+- [x] **`WS_THICKFRAME` via `CreateParams`** — `TNoteForm.CreateParams` sets `WS_THICKFRAME` so Windows knows the window has a sizing border even though `BorderStyle = bsNone`.
+- [x] **`StyleElements -= [seBorder, seClient]`** — drops the VCL `TFormStyleHook` that intercepts `WM_NCHITTEST` and forces `HTCLIENT`, which was silently defeating all `HT*` sizing codes. Applied in `TWindowUtils.EnableBorderlessWindow`.
+- [x] **`TNoteForm.Notification` override** — hooks dynamically created windowed children (checklist item panels, tag chips) into `TEdgeHitTestHook` as they are added, via `TEdgeHitTestHook.InstallControl`.
+
+#### Visual Polish
+
+- [x] **DWM rounded corners** — `TWindowUtils.EnableRoundedCorners` calls `DwmSetWindowAttribute` with `DWMWA_WINDOW_CORNER_PREFERENCE = DWMWCP_ROUND (2)`.
+- [x] **Header buttons: `TButton` → `TSpeedButton` + Segoe MDL2 Assets** — all 7 header buttons converted; `Flat = True`; icon glyphs from the MDL2 codepoint range. DFM and Pascal code both use `'Segoe MDL2 Assets'` (reconciled — the old DFM used `'Segoe Fluent Icons'` with Fluent codepoints; the Pascal `FormCreate` had already switched to MDL2; now both agree).
+- [x] **Custom scrollbar** — `pnlCustomScrollbar` (8px wide, `alRight`) + `pnlThumb` + `FTimerScroll` (30ms) implementing a minimal proportional thumb that tracks the memo's vertical scroll position.
+- [x] **Memo container** — `pnlMemoContainer` (`alClient`) wraps `mmContent` so the custom scrollbar can sit alongside it without disturbing the content layout.
+
+#### Position Persistence Fixes
+
+- [x] **`FIsLoaded` guard in `FormResize`** — `FormResize` was firing during DFM streaming (before `FormShow`) and overwriting `FNote.Left/Top` with the form's default `0,0` coordinates. Introducing `FIsLoaded: Boolean` (set to `True` at the end of `FormShow`) makes `FormResize` a no-op until the form is fully shown.
+- [x] **`WM_EXITSIZEMOVE` handler** — saves `FNote.Left/Top/Width/Height` and calls `FEditorContext.ScheduleSave(FNote)` at the end of every native drag/resize. Without this, position changes via the native `WS_THICKFRAME` loop were not saved.
+- [x] **Native drag via `ReleaseCapture` + `WM_NCLBUTTONDOWN`** — `pnlHeaderMouseDown` now issues `ReleaseCapture; SendMessage(Handle, WM_NCLBUTTONDOWN, HTCAPTION, 0)` instead of manual `Left/Top` arithmetic. This engages the native OS move loop, which fires `WM_EXITSIZEMOVE` on drop.
+
+#### Cleanup
+
+- [x] **Removed unused `FDragMode` / `FDragOffset`** — dead after the native-drag switch.
+- [x] **Fixed W1036 uninitialized `Key` warning** — `Key := nil` added before the `for Key in FHooks.Keys do` loop in `TEdgeHitTestHook.Notification`.
+
+### Validation Results (2026-09-06)
+
+| # | Check | Result |
+|---|-------|--------|
+| 1 | `build.bat` (Win32 Debug, dcc32 v36.0) | **PASS** — 0 errors (only pre-existing hints + 1 pre-existing W1024 in scroll math) |
+| 2 | `build_tests.bat` + run | **PASS** — **146 Found / 146 Passed / 0 Failed / 0 Errored / 0 Leaked / 0 Ignored** |
+| 3 | `gui_resize_test.ps1` — GWL_STYLE | **PASS** — `0x96040000 WS_THICKFRAME=True` |
+| 4 | `gui_resize_test.ps1` — hit-test probes (10/10) | **PASS** — right→11, left→10, bottom→15, top→12, top-left→13, top-right→14, bottom-left→16, bottom-right→17, header-center→2 (HTCAPTION), center→1 (HTCLIENT) — all correct |
+| 5 | `gui_resize_test.ps1` — resize drags (9 cases) | **dW/dH=0 (test-env limitation)** — synthetic `mouse_event` is blocked by UAC/UIPI from engaging the native `WS_THICKFRAME` resize loop when the target process runs at a higher integrity level. Not a code defect; resize verified interactively by user. |
+| 6 | `gui_resize_test.ps1` — header drag | **0 (same UAC/UIPI limitation)** — native drag loop requires real desktop input |
+| 7 | `gui_resize_test.ps1` — PERSIST | **PASS** — before `100,100,400,350 (W=300 H=250)` = after `100,100,400,350 (W=300 H=250)`; geometry survives close + relaunch |
+| 8 | `gui_resize_test.ps1` — restore | **PASS** — 3 note file(s) restored; count matches beforeCount=3 |
+| 9 | Position persistence (manual) | **PASS — user-verified** ("ok working now") |
+| 10 | Font consistency | **PASS** — DFM and Pascal both use `'Segoe MDL2 Assets'` + MDL2 codepoints for all 7 header buttons |
+| 11 | `git commit` | **45092ff** — 5 files changed, 726 insertions, 179 deletions |
+
+### Files Changed During Phase 6E
+
+| File | Change |
+|------|--------|
+| `src/Forms/uNoteForm.pas` | `TEdgeHitTestHook.Install` in `FormCreate`; `Notification` override; `CreateParams` (`WS_THICKFRAME`); `WMNCHitTest` handler; `WMGetMinMaxInfo` (`MIN_WIDTH=200`, `MIN_HEIGHT=150`); `WMExitSizeMove` (save geometry on drop); `FIsLoaded` guard in `FormResize`; native drag in `pnlHeaderMouseDown`; custom scrollbar + memo container setup; `edTitle` promotion; `TSpeedButton` + MDL2 icon assignment in `FormCreate`; removed unused `FDragMode`/`FDragOffset` |
+| `src/Forms/uNoteForm.dfm` | `TButton` → `TSpeedButton` (`Flat=True`) for all 7 header buttons; `Font.Name = 'Segoe MDL2 Assets'` + MDL2 codepoints; `edTitle` margins; `mmContent` margins; `pnlChecklist` margins; `pnlTagsFooter` margins |
+| `src/Utils/uWindowUtils.pas` | `TEdgeHitTestHook` class (new) — child-control `WM_NCHITTEST` passthrough for resize band; `TWindowDragHelper` (retained, unused by `TNoteForm` directly); `HandleNCHitTest` — corners-first ordering fix; `EnableBorderlessWindow` — `StyleElements -= [seBorder, seClient]`; `EnableRoundedCorners`; `Key := nil` initialization fix (W1036) |
+| `README.md` | Updated features section: resize, visual polish, position persistence |
+| `gui_resize_test.ps1` | **Added** — resize regression test driver: snapshot→tests→restore; `WS_THICKFRAME` check; 10 hit-test probes; 9 resize drags; header drag; PERSIST; zero-file abort guard; restore-count assertion |
+| `docs/DEVELOPMENT_PLAN.md` | Phase 6D + 6E closure entries (this doc-sync pass) |
+
+### Known Issues / Out of Scope (unchanged by this phase)
+
+- **Backup/restore schema gap** — `TBackupService` still uses the legacy serializer; backup → restore drops tags/checklistItems/favorite (carry-forward from Phase 6D, tracked there).
+- **Resize drags not verifiable via scripted `mouse_event`** — UAC/UIPI blocks synthetic input from reaching the native `WS_THICKFRAME` sizing loop in this test environment. Interactively verified by user.
+- **Custom scrollbar styling** — the thumb color is computed from the note color palette but does not animate on hover/drag. Follow-up polish candidate.
+- **W1024 (sign/unsigned widening)** — pre-existing in the custom scrollbar's thumb-position calculation (`SI.nPos / (SI.nMax - SI.nPage + 1)`). Not introduced by 6E; safe arithmetic widening.
+
+---
+
 *Document created: 2026-08-31*
-*Last updated: 2026-09-05*
+*Last updated: 2026-09-06*
