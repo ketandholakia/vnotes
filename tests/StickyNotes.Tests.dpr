@@ -10,6 +10,7 @@ uses
   TNoteTests in 'Models\TNoteTests.pas',
   TSettingsTests in 'Models\TSettingsTests.pas',
   TJsonStorageTests in 'Models\TJsonStorageTests.pas',
+  TSQLiteStorageTests in 'Models\TSQLiteStorageTests.pas',
   TAutosaveServiceTests in 'Models\TAutosaveServiceTests.pas',
   TNoteApplicationTests in 'Models\TNoteApplicationTests.pas',
   TNoteManagerTests in 'Models\TNoteManagerTests.pas',
@@ -17,7 +18,8 @@ uses
   TSingleInstanceTests in 'Models\TSingleInstanceTests.pas',
   TBackupSchedulerTests in 'Models\TBackupSchedulerTests.pas',
   TBackupServiceTests in 'Models\TBackupServiceTests.pas',
-  TMonitorUtilsTests in 'Models\TMonitorUtilsTests.pas';
+  TMonitorUtilsTests in 'Models\TMonitorUtilsTests.pas',
+  TStorageMigrationServiceTests in 'Models\TStorageMigrationServiceTests.pas';
 
 var
   runner: ITestRunner;

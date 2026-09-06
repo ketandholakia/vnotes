@@ -13,9 +13,9 @@ This ledger tracks the verification of forward-looking and current-state claims 
 | `backup retention` | Phase 4D wishlist (line 518, 535, 556) | **STALE** (shipped 4H) | Corrected (doc) | 2026-09-06 |
 | `hotkey-failure surfacing` | Phase 4D wishlist (line 518, 535, 556) | **STALE** (shipped 5A) | Corrected (doc) | 2026-09-06 |
 | `persisted last-backup time` | Phase 4D wishlist (line 518, 535, 556) | **STALE** (shipped 6H) | Implemented and validated in Phase 6H | 2026-09-06 |
-| `SQLite storage: NOT IMPLEMENTED (stub only)` | Trailing block (line 280), 4A | **TRUE** (uSQLiteStorage exists as stub) | Confirmed | 2026-09-06 |
+| `SQLite storage: NOT IMPLEMENTED (stub only)` | Trailing block (line 280), 4A | **STALE** (TSQLiteStorage implemented in 6J) | Implemented as secondary backend in Phase 6J; production/default storage remains JSON | 2026-09-06 |
 | `Rich text: NOT IMPLEMENTED` | Trailing block (line 283) | **TRUE** | Confirmed | 2026-09-06 |
-| `High-DPI: NOT ADDRESSED` | Current Risks, Trailing block | **TRUE** | Confirmed | 2026-09-06 |
+| `High-DPI: NOT ADDRESSED` | Current Risks, Trailing block | **RESOLVED** (PerMonitorV2 enabled; layout & monitor clamping validated) | Audited and validated in Phase 6I | 2026-09-06 |
 | `ILogger = OutputDebugString only` | Known Limitations | **TRUE** | Confirmed | 2026-09-06 |
 | `BackupService unused-return/stream warnings` | Known Limitations | **TRUE** | Confirmed | 2026-09-06 |
 | `Custom scrollbar styling polish candidate` | Phase 6E Known Issues | **TRUE** | Confirmed | 2026-09-06 |
@@ -23,3 +23,4 @@ This ledger tracks the verification of forward-looking and current-state claims 
 | `Current Risks #7: TTrayForm Centralization` | Current Risks | **STALE** (addressed in Phase 2A) | Corrected (doc) | 2026-09-06 |
 | `Architecture diagram` | Architecture | **STALE** (out of date since Phase 2A) | Corrected (doc) | 2026-09-06 |
 | `Phase 5B introduced v3 serializer` | 5B Reconstruction, 6D/6F | **FALSE** (introduced in 6D.1) | Corrected (doc) | 2026-09-06 |
+| `JSON -> SQLite migration` | Phase 6K | **IMPLEMENTED** (TStorageMigrationService) | One-time atomic migration service implemented and verified; JSON remains default production backend | 2026-09-06 |

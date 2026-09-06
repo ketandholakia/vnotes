@@ -1021,6 +1021,66 @@ Two precision tests added to `tests/Models/TBackupServiceTests.pas`:
 
 - None. All planned Phase 6 tasks are complete and validated.
 
+## Phase 6J — SQLite Storage Implementation — COMPLETE + VALIDATED (2026-09-06)
+
+> **Status:** **COMPLETE + VALIDATED** — `TSQLiteStorage` fully implemented behind the existing `INoteStorage` abstraction using FireDAC components (`TFDConnection`, `TFDQuery`). Database schema (`vnotes.db`) uses normalized tables (`notes`, `note_tags`, `note_checklist_items`) with cascade deletes, explicit order columns (`tag_order`, `item_order`), and full field serialization (including `favorite`, `created_at`, `updated_at`, etc.). Transactions (`StartTransaction`/`Commit`/`Rollback`) guarantee atomic writes for multi-table updates. Schema versioning uses `PRAGMA user_version = 1`. Comprehensive DUnitX test suite (`TSQLiteStorageTests.pas`, 15 tests) added and passing (**170/170 total tests PASS**). **Production storage backend remains JSON (`TJsonStorage`); SQLite backend is implemented as an additional secondary backend only.**
+
+### What Changed
+
+- **`TSQLiteStorage` (`src/Storage/uSQLiteStorage.pas`)**:
+  - Replaced stub implementation with a production-quality SQLite backend implementing `INoteStorage`.
+  - Database schema: `notes` table (scalar attributes: `id`, `title`, `content`, `left_pos`, `top_pos`, `width`, `height`, `always_on_top`, `color`, `collapsed`, `locked`, `created_at`, `updated_at`, `favorite`, `schema_version`), `note_tags` table (`note_id`, `tag_text`, `tag_order`), and `note_checklist_items` table (`note_id`, `item_text`, `is_done`, `item_order`).
+  - Foreign key constraints enabled (`PRAGMA foreign_keys = ON`) with `ON DELETE CASCADE` for tag and checklist child records.
+  - Multi-table writes wrapped in FireDAC transactions (`StartTransaction` / `Commit` / `Rollback`).
+  - All queries use parameterized SQL.
+  - Connection/query handle lifetimes strictly managed with try/finally blocks.
+  - ISO8601 UTC timestamp formatting and parsing (`DateToISO8601(..., True)` / `ISO8601ToDate(..., True)`) matching `TJsonStorage` semantics.
+- **`TSQLiteStorageTests` (`tests/Models/TSQLiteStorageTests.pas`)**:
+  - Created 15 focused DUnitX tests covering DB creation, empty DB loading, scalar fields, tags/order, checklist/done state, favorite flag, ISO8601 timestamps, position/size, update on conflict, delete, nonexistent delete safety, next ID calculation, reopen persistence, and JSON vs. SQLite semantic equivalence comparison.
+  - Test database files isolated to temporary paths with automated cleanup.
+- **Test Runner (`tests/StickyNotes.Tests.dpr`)**:
+  - Registered `TSQLiteStorageTests` unit.
+
+### Validation Results (2026-09-06)
+
+| # | Check | Result |
+|---|-------|--------|
+| 1 | Main build (`build.bat`) | **PASS** — 0 errors |
+| 2 | Automated Test Suite (`build_tests.bat` + `StickyNotes.Tests.exe`) | **PASS** — **170 Found / 170 Passed / 0 Failed / 0 Errored / 0 Leaked / 0 Ignored** (155 baseline + 15 new) |
+| 3 | MSBuild (`msbuild src\StickyNotes.dproj /t:Build /p:Config=Debug /p:Platform=Win32`) | **PASS** — 0 errors |
+| 4 | Git Diff Check (`git diff --check`) | **PASS** — clean |
+| 5 | Production Safety Verification | **PASS** — `TJsonStorage` untouched and remains default backend; no migration executed; existing JSON notes untouched. |
+
+## Phase 6K — JSON → SQLite Migration Implementation — COMPLETE + VALIDATED (2026-09-06)
+
+> **Status:** **COMPLETE + VALIDATED** — `TStorageMigrationService` fully implemented in `src/Services/uStorageMigrationService.pas`. One-time, atomic, non-destructive migration service copies JSON note files from `%APPDATA%\StickyNotes\notes\` to SQLite `%APPDATA%\StickyNotes\vnotes.db`. Source JSON note files are never modified, deleted, or moved. Destination safety check aborts safely if destination SQLite database already contains notes. Any corrupted or malformed source JSON file causes a complete transaction rollback with zero notes migrated. Strict post-migration verification asserts exact 1:1 semantic equality across count, IDs, scalar fields, flags, favorite, timestamps, tags (value & order), and checklist items (text, done state & order) before committing the transaction. Comprehensive DUnitX test suite (`TStorageMigrationServiceTests.pas`, 16 tests) added and passing (**186/186 total tests PASS**). **Production storage backend remains JSON (`TJsonStorage`).**
+
+### What Changed
+
+- **`TStorageMigrationService` (`src/Services/uStorageMigrationService.pas`)**:
+  - Implemented `TStorageMigrationService.MigrateJsonToSQLite(const AAppDataPath: string): TMigrationResult`.
+  - Aborts safely if `vnotes.db` exists and contains existing notes (`Destination SQLite database is not empty`).
+  - Performs strict pre-flight JSON validation; fails completely on malformed/corrupted files with transaction rollback.
+  - Executes batch import inside an atomic SQLite transaction (`BeginTransaction` / `CommitTransaction` / `RollbackTransaction`).
+  - Performs 1:1 semantic verification of all migrated notes before transaction commit.
+- **`TSQLiteStorage` (`src/Storage/uSQLiteStorage.pas`)**:
+  - Added public transaction controls (`BeginTransaction`, `CommitTransaction`, `RollbackTransaction`, `IsInTransaction`).
+  - Updated `SaveNote` and `DeleteNote` to respect active outer transactions without early commits.
+- **`TStorageMigrationServiceTests` (`tests/Models/TStorageMigrationServiceTests.pas`)**:
+  - Added 16 DUnitX tests covering empty JSON directory, single note, multiple notes, full rich note, tag order, checklist order, favorite, positioning, timestamps, multiple IDs, malformed JSON complete failure/rollback, existing empty DB success, existing non-empty DB rejection, JSON source file preservation, success result values, and failure result values.
+- **Registrations**:
+  - `src/StickyNotes.dpr`, `src/StickyNotes.dproj`, and `tests/StickyNotes.Tests.dpr`.
+
+### Validation Results (2026-09-06)
+
+| # | Check | Result |
+|---|-------|--------|
+| 1 | Main build (`build.bat`) | **PASS** — 0 errors |
+| 2 | Automated Test Suite (`build_tests.bat` + `StickyNotes.Tests.exe`) | **PASS** — **186 Found / 186 Passed / 0 Failed / 0 Errored / 0 Leaked / 0 Ignored** (170 baseline + 16 new) |
+| 3 | MSBuild (`msbuild src\StickyNotes.dproj /t:Build /p:Config=Debug /p:Platform=Win32`) | **PASS** — 0 errors |
+| 4 | Git Diff Check (`git diff --check`) | **PASS** — clean |
+| 5 | Production Safety Verification | **PASS** — `TJsonStorage` untouched and remains default backend; production startup un-switched; existing JSON notes untouched. |
+
 ---
 
 *Document created: 2026-08-31*
