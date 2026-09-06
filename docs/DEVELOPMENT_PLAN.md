@@ -12,14 +12,15 @@
 ```
 StickyNotes.dpr (entry point)
     └── TTrayForm (hidden main form, owns tray icon)
-        ├── TNoteManager (note orchestration)
-        ├── TJsonStorage (JSON file-per-note persistence)
-        ├── TAutosaveService (debounced autosave)
-        ├── TBackupService (ZIP backup/restore)
-        ├── THotkeyService (global hotkeys)
-        ├── TStartupService (autostart registry)
-        ├── TThemeService (light/dark themes)
-        └── TSettings (INI-based settings)
+        ├── TNoteApplication (application orchestration)
+        │     ├── TNoteManager (note orchestration)
+        │     ├── TJsonStorage (JSON file-per-note persistence)
+        │     ├── TAutosaveService (debounced autosave)
+        │     ├── TBackupService (ZIP backup/restore)
+        │     ├── THotkeyService (global hotkeys)
+        │     ├── TStartupService (autostart registry)
+        │     ├── TThemeService (light/dark themes)
+        │     └── TSettingsController (owns TSettings)
 ```
 
 ### Storage Mechanism
@@ -37,19 +38,24 @@ StickyNotes.dpr (entry point)
 7. **TThemeService**: VCL style management, color palettes
 ### Existing Features
 - Create, edit, delete, duplicate notes
+- Notes list + search
 - Move, resize, collapse notes
 - Pin/always-on-top
 - Change note color (8 colors)
 - Lock notes
+- Title editor
+- Tags, checklist, favorites
 - Autosave with debounce
 - JSON persistence
 - Tray icon with menu
 - Global hotkeys
 - Settings (autosave delay, theme, hotkeys, backup, autostart)
+- Scheduled backups + backup retention
 - Backup/restore
-- Multi-monitor positioning
+- Multi-monitor clamping
 - Position/size persistence
 - Dark/light theme
+- Single-instance behavior
 
 ## Current Risks (Verified)
 
@@ -85,16 +91,16 @@ StickyNotes.dpr (entry point)
 ### 6. High-DPI Limitations (LOW)
 **Issue**: The application may not handle high-DPI displays properly. VCL styles may not scale correctly.
 **Impact**: Blurry UI on high-DPI displays.
-**Status**: Not addressed in this phase.
+**Status**: Deferred. Not currently implemented.
 
 ### 7. TTrayForm Centralization (MEDIUM)
 **Issue**: `TTrayForm` is the hidden main form that owns all services and creates note forms. This creates a central point of failure and makes the architecture difficult to test.
 **Impact**: Tight coupling, difficult to test, single point of failure.
-**Status**: Not addressed in this phase (architecture refactor comes later).
+**Status**: FIXED - Addressed in Phase 2A by extracting `TNoteApplication`.
 
 ## Development Phases
 
-### Phase 0 - Baseline & Safety (CURRENT)
+### Phase 0 - Baseline & Safety
 - [x] Inspect repository
 - [x] Create DEVELOPMENT_PLAN.md
 - [x] Create test foundation (DUnitX structure)
@@ -112,10 +118,10 @@ StickyNotes.dpr (entry point)
 - [x] Autosave safety - Multiple pending notes via TDictionary<Int64,TNote>; debounce preserved; CancelSave/Flush work correctly
 
 ### Phase 2 - Architecture
-- [ ] Replace TTrayForm with TNoteApplication
-- [ ] Introduce dependency injection
-- [ ] Decouple services from forms
-- [ ] Add proper event system
+- [x] Replace TTrayForm with TNoteApplication
+- [x] Introduce dependency injection
+- [x] Decouple services from forms
+- [x] Add proper event system
 
 ## Test Foundation
 
@@ -124,20 +130,27 @@ StickyNotes.dpr (entry point)
 tests/
   StickyNotes.Tests.dpr
   Models/
+    TAutosaveServiceTests.pas
+    TBackupSchedulerTests.pas
+    TBackupServiceTests.pas
+    TJsonStorageTests.pas
+    TMonitorUtilsTests.pas
+    TNoteApplicationTests.pas
+    TNoteManagerTests.pas
+    TNoteQueryTests.pas
     TNoteTests.pas
     TSettingsTests.pas
-    TJsonStorageTests.pas
-    TAutosaveServiceTests.pas
+    TSingleInstanceTests.pas
 ```
 
-### Priority Tests (Created but not compilable in Delphi 10.3)
-1. TNote serialization/deserialization ✅ (test code written)
-2. TSettings serialization/deserialization ✅ (test code written)
-3. JSON save/load ✅ (test code written)
-4. Atomic save (temporary file + replace) ✅ (test code written)
-5. Multiple-note autosave ✅ (test code written)
-6. Autosave debounce behavior ✅ (test code written)
-7. Corrupted JSON handling ✅ (test code written)
+### Priority Tests (148/148 PASS in Delphi 12)
+1. TNote serialization/deserialization ✅
+2. TSettings serialization/deserialization ✅
+3. JSON save/load ✅
+4. Atomic save (temporary file + replace) ✅
+5. Multiple-note autosave ✅
+6. Autosave debounce behavior ✅
+7. Corrupted JSON handling ✅
 
 ### Test Compilation Status
 - **Status**: VERIFIED - Fully compilable and executing in Delphi 12 environment. 148/148 tests pass.
@@ -162,12 +175,12 @@ tests/
 ## Next Recommended Task
 
 **Next steps**:
-- Implement **Phase 6H — backup retention + persisted last-backup timestamp** (the surviving 4C/4D wishlist items).
+- Implement **Phase 6H — persisted last-backup timestamp** (the surviving 4C/4D wishlist item).
 - Alternate candidates: high-DPI scaling, 6E scrollbar hover polish.
 
 ---
 
-## Files Changed During Verification
+## Files Changed During Verification (Phase 0 Historical Record)
 
 | File | Change |
 |------|--------|
@@ -557,7 +570,7 @@ Tray New Note · `Ctrl+Alt+N` · first-launch auto-note (all via `OnNewNote`) ·
 
 ## Phase 4H — Backup Retention & Hotkey Logging — RECONSTRUCTED
 > RECONSTRUCTED from git history on 2026-09-06 (commits f48c02c..2a174c7). Not contemporaneous — details come from commit messages and diffs.
-- What changed: Added backup retention cleanup mechanism and UI configuration in settings. Created comprehensive backup test suites (`TBackupServiceTests.pas` and `TBackupSchedulerTests.pas`). Added logging for hotkey registration failures.
+- What changed: Added backup retention cleanup mechanism and UI configuration in settings. Extended backup test suites (`TBackupServiceTests.pas` and `TBackupSchedulerTests.pas`). Added logging for hotkey registration failures.
 - Files changed: `src/Forms/uSettingsForm.dfm`, `src/Forms/uSettingsForm.pas`, `src/Models/uSettings.pas`, `src/Services/uBackupService.pas`, `tests/Models/TBackupSchedulerTests.pas`, `tests/Models/TBackupServiceTests.pas`, `src/Application/uNoteEditorContext.pas`, `src/Forms/uNoteForm.pas`, `src/Services/uHotkeyService.pas`.
 
 ## Phase 5A — Surface Backup & Hotkey Failures — RECONSTRUCTED
@@ -567,7 +580,7 @@ Tray New Note · `Ctrl+Alt+N` · first-launch auto-note (all via `OnNewNote`) ·
 
 ## Phase 5B — Harden Backup Integrity & Recovery — RECONSTRUCTED
 > RECONSTRUCTED from git history on 2026-09-06 (commit 7f6add3). Not contemporaneous — details come from commit messages and diffs.
-- What changed: Hardened backup integrity and recovery. Crucially, this phase introduced the v3 backup serializer (`schemaVersion: 3`, `Favorite`, `tags`, `checklistItems`), resolving the backup format limitation long before Phase 6D.
+- What changed: Hardened backup integrity and recovery by adding a manifest and pre-restore backup support. *(Correction 2026-09-06: A previous audit claimed this commit introduced the v3 serializer; git history confirms it did not. The v3 fields were added later in 6D.1).*
 - Files changed: `src/Services/uBackupService.pas`, `tests/Models/TBackupServiceTests.pas`.
 
 ## Phase 5D — Rebrand to V-Notes — RECONSTRUCTED
@@ -822,7 +835,7 @@ The above entry was drafted from a review of the in-tree diff without a local co
 
 ### Known Issue (Carry-forward to a Future Phase)
 
-- **Backup/restore schema gap** — `TBackupService` serializes and deserializes notes using a hardcoded legacy field set (no `schemaVersion`, no `tags`, no `checklistItems`, no `favorite`). A backup taken after Phase 6A/6C changes will restore notes without those fields. Fix: replace the backup serializer with a direct call to `TJsonStorage.NoteToJson` / `JsonToNote`. Deferred; tracked here for future reference. *(Correction 2026-09-06: The v3 serializer fields were actually added in Phase 5B, well before 6D was written. This entry was factually incorrect).*
+- **Backup/restore schema gap** — `TBackupService` serializes and deserializes notes using a hardcoded legacy field set (no `schemaVersion`, no `tags`, no `checklistItems`, no `favorite`). A backup taken after Phase 6A/6C changes will restore notes without those fields. Fix: replace the backup serializer with a direct call to `TJsonStorage.NoteToJson` / `JsonToNote`. Deferred; tracked here for future reference. *(Correction 2026-09-06: This "gap" was documented before its own Phase 6D.1 fix. The v3 serializer fields were actually added in 6D.1 (commit `f7d01b2`), so this entry was factually incorrect and immediately obsolete).*
 
 ---
 
@@ -964,11 +977,11 @@ Two precision tests added to `tests/Models/TBackupServiceTests.pas`:
 
 > **6E entry said:** "`TBackupService` still uses the legacy serializer; backup → restore drops tags/checklistItems/favorite (carry-forward from Phase 6D, tracked there)."
 
-**RESOLVED — these statements were incorrect.** Code review in Phase 6F confirmed that `uBackupService.pas` already writes `schemaVersion: 3`, `Favorite`, `tags`, and `checklistItems` in `CreateBackupZip`, and reads them with tolerant defaults in `DoRestore`. The gap was documented before the implementation was verified. *(Correction 2026-09-06: The v3 serializer was implemented in Phase 5B; the 6D entry missed it, leading to this phantom phase).* No corrective action was required.
+**RESOLVED — these statements were incorrect.** Code review in Phase 6F confirmed that `uBackupService.pas` already writes `schemaVersion: 3`, `Favorite`, `tags`, and `checklistItems` in `CreateBackupZip`, and reads them with tolerant defaults in `DoRestore`. The gap was documented before the implementation was verified. *(Correction 2026-09-06: The v3 serializer was actually implemented in Phase 6D.1 (commit `f7d01b2`); the 6D documentation entry missed its own phase's fix, leading to this phantom phase).* No corrective action was required.
 
 ## Phase 6G — Doc Reconstruction & Claims Audit — COMPLETE + CLOSED (2026-09-06)
 
-> **Status:** **COMPLETE + CLOSED** — Phase 6G audit complete; missing phases reconstructed; stale claims updated with inline corrections; `CLAIMS_LEDGER.md` established. Build: docs only. Commit: `2ce19f9`
+> **Status:** **COMPLETE + CLOSED** — Phase 6G audit complete; missing phases reconstructed; stale claims updated with inline corrections; `CLAIMS_LEDGER.md` established. Build: docs only. Commit: `dbc5bc4`
 
 ---
 

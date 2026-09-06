@@ -20,3 +20,6 @@ This ledger tracks the verification of forward-looking and current-state claims 
 | `BackupService unused-return/stream warnings` | Known Limitations | **TRUE** | Confirmed | 2026-09-06 |
 | `Custom scrollbar styling polish candidate` | Phase 6E Known Issues | **TRUE** | Confirmed | 2026-09-06 |
 | `W1024 scrollbar thumb-position warning` | Phase 6E Known Issues | **TRUE** | Confirmed | 2026-09-06 |
+| `Current Risks #7: TTrayForm Centralization` | Current Risks | **STALE** (addressed in Phase 2A) | Corrected (doc) | 2026-09-06 |
+| `Architecture diagram` | Architecture | **STALE** (out of date since Phase 2A) | Corrected (doc) | 2026-09-06 |
+| `Phase 5B introduced v3 serializer` | 5B Reconstruction, 6D/6F | **FALSE** (introduced in 6D.1) | Corrected (doc) | 2026-09-06 |
