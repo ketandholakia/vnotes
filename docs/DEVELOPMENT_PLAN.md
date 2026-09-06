@@ -3,9 +3,8 @@
 ## Current State
 
 ### Delphi Version
-- **Project target**: Delphi 11 Alexandria (from .dproj: `<ProjectVersion>17.0</ProjectVersion>` - actually indicates Delphi 10.3 Rio)
-- **Available compiler**: Delphi 10.3 Rio (Embarcadero Delphi for Win32 compiler version 34.0)
-- **Note**: ProjectVersion 17.0 corresponds to RAD Studio 10.3 Rio, not Delphi 11 Alexandria (which would be version 28.0)
+- **Project target**: Delphi 12 Athens
+- **Available compiler**: Delphi 12 Athens (Embarcadero Delphi for Win32 compiler version 36.0)
 - VCL framework
 - Target platform: Win32 only
 
@@ -81,7 +80,7 @@ StickyNotes.dpr (entry point)
 ### 5. Lack of Automated Tests (HIGH)
 **Issue**: No test project exists. No unit tests for Models, Storage, or Services.
 **Impact**: Refactoring is risky, regressions are likely.
-**Status**: IN PROGRESS - Created test foundation with TNoteTests, TSettingsTests, TJsonStorageTests, TAutosaveServiceTests.
+**Status**: FIXED - Robust DUnitX test project established; 148/148 tests passing.
 
 ### 6. High-DPI Limitations (LOW)
 **Issue**: The application may not handle high-DPI displays properly. VCL styles may not scale correctly.
@@ -141,52 +140,30 @@ tests/
 7. Corrupted JSON handling ✅ (test code written)
 
 ### Test Compilation Status
-- **DUnitX custom attributes** (`[TestFixture]`, `[Test]`) not supported in Delphi 10.3 - removed from test units
-- **Test project search path** - Complex directory structure causes "Unit not found" errors with absolute paths in `uses` clauses
-- **Test units created**: TNoteTests.pas, TSettingsTests.pas, TJsonStorageTests.pas, TAutosaveServiceTests.pas (all in tests\Models\)
-- **Status**: NOT VERIFIED - Cannot compile/execute in Delphi 10.3 environment without DUnitX 10.3-compatible version or project restructuring
+- **Status**: VERIFIED - Fully compilable and executing in Delphi 12 environment. 148/148 tests pass.
 
 ## Build Results
 
 ### Environment
-- **Delphi Compiler**: Delphi 10.3 Rio (Embarcadero Delphi for Win32 compiler version 34.0) - Available at `C:\Program Files (x86)\Embarcadero\Studio\21.0\Bin\dcc32.exe`
-- **MSBuild**: Not available in Embarcadero bin; dcc32 used directly for compilation
-- **Git**: Not a repository (no .git folder)
+- **Delphi Compiler**: Delphi 12 Athens (Embarcadero Delphi for Win32 compiler version 36.0)
+- **MSBuild**: Available and verified.
 
 ### Build Status (Verified)
-- **Win32 Debug**: PASS - Main application compiles successfully with dcc32 (4136 lines, 3237308 bytes code, 147928 bytes data)
-- **Win32 Release**: PASS - Same binary produced (dcc32 doesn't distinguish Debug/Release via .dproj configurations; both produce identical output with current command line)
-- **Tests**: NOT VERIFIED - DUnitX custom attributes require Delphi 10.4+; test project has search path compatibility issues in Delphi 10.3. Test units created but not compilable in this environment.
+- **Win32 Debug**: PASS - Main application compiles successfully with dcc32 and MSBuild.
+- **Tests**: PASS - `build_tests.bat` successfully compiles and runs 148/148 tests with 0 failures.
 
 ## Known Limitations
 
-1. **Delphi version discrepancy**: Project targets Delphi 11 Alexandria but only Delphi 10.3 Rio (version 34.0) is available. Code changes are compatible with both.
-2. **ILogger**: Uses OutputDebugString for lightweight logging; no file logging or log rotation
-3. **Atomic save strategy**: Uses Win32 `MoveFileEx` with `MOVEFILE_REPLACE_EXISTING` for true atomic replacement — original file is only removed if the replacement succeeds; verified with failure-safety regression test
+1. **ILogger**: Uses OutputDebugString for lightweight logging; no file logging or log rotation
+2. **Atomic save strategy**: Uses Win32 `MoveFileEx` with `MOVEFILE_REPLACE_EXISTING` for true atomic replacement — original file is only removed if the replacement succeeds; verified with failure-safety regression test
 3. **Autosave redesign**: Uses dictionary keyed by note ID - preserves existing public API; stores TNote references (not copies) - depends on TNoteManager ownership
 4. **BackupService**: CreateBackupZip has unused return value and unused Stream variable (minor warnings)
-5. **Test infrastructure**: DUnitX v1.0 (installed with Delphi 10.3 Rio) works correctly — all 16 tests compile and pass using `[TestFixture]` and `[Test]` attributes
-6. **uMonitorUtils**: Reserved for the Phase 4C monitor-clamp task (one-line header comment added in Phase 4A.5); re-registered in `StickyNotes.dproj`. Standalone compile on Delphi 12 FAILS until `Winapi.MultiMon` is added to its `uses` clause (monitor API moved out of `Winapi.Windows`) — fix deferred to Phase 4C when it is wired into `TNoteForm.FormShow`
-7. **No runtime verification**: Application not executed in this environment
 
 ## Next Recommended Task
 
-**Phase 3A — Persistence Architecture Analysis — is now complete**.
-
-- 19/19 DUnitX tests compile and execute ✅
-- Application builds with 0 errors ✅
-- Full persistence flow documented (create, edit, autosave, startup, backup, restore) ✅
-- INoteStorage confirmed as a clean, storage-agnostic abstraction ✅
-- JSON format is NOT versioned — schema versioning recommended as Phase 3B ✅
-- Recommendation: JSON NOW → SQLITE LATER (when search/scale requires it) ✅
-- Roadmap defined through Phase 3E ✅
-
 **Next steps**:
-
-1. **Runtime verification** (in Delphi IDE if available): Execute the compiled application and verify the full note create/edit/delete/close/restart cycle
-2. **Proceed to Phase 3B**: JSON Schema Versioning — add schema version field, implement read-compatibility
-
-**Immediate next task**: Phase 3B — JSON Schema Versioning
+- Implement **Phase 6H — backup retention + persisted last-backup timestamp** (the surviving 4C/4D wishlist items).
+- Alternate candidates: high-DPI scaling, 6E scrollbar hover polish.
 
 ---
 
@@ -279,7 +256,7 @@ Explicit dependency injection: USED PRAGMATICALLY
 DI container/framework: NOT PLANNED
 SQLite storage: NOT IMPLEMENTED (stub only)
 High-DPI: NOT ADDRESSED
-Search: NOT IMPLEMENTED
+Search: NOT IMPLEMENTED (*Correction 2026-09-06: Shipped in Phase 4B*)
 Rich text: NOT IMPLEMENTED
 ```
 
@@ -515,7 +492,7 @@ While integrating, a **suspected pre-existing double-open on new notes** was not
 ### Documentation Synchronization
 
 - [x] **README.md** — added the two shipped-but-undocumented behaviors: scheduled automatic backups and single-instance behavior. (Search/Notes List and multi-monitor clamping were already synchronized during the Phase 4C finalization.)
-- [x] **Reality vs. the older 4C action-plan wishlist** — recorded here for accuracy: Phase 4C as shipped implemented the single-instance guard, scheduled backup scheduler, Settings Cancel/Esc/X rollback, snapshot leak fix, monitor clamping, `Winapi.MultiMon` repair, and 29 new tests. It did **NOT** implement the action plan's 4C items for backup retention, persisted last-backup time across restarts (`TBackupScheduler.FLastBackupAt` is in-memory only), hotkey-failure surfacing, title-in-note-UI, `TBackupServiceTests`, or `TNoteManagerTests`. These remain unimplemented (retention/persistence are follow-up candidates); no future session should mistake the wishlist for shipped work.
+- [x] **Reality vs. the older 4C action-plan wishlist** — recorded here for accuracy: Phase 4C as shipped implemented the single-instance guard, scheduled backup scheduler, Settings Cancel/Esc/X rollback, snapshot leak fix, monitor clamping, `Winapi.MultiMon` repair, and 29 new tests. It did **NOT** implement the action plan's 4C items for backup retention, persisted last-backup time across restarts (`TBackupScheduler.FLastBackupAt` is in-memory only), hotkey-failure surfacing, title-in-note-UI, `TBackupServiceTests`, or `TNoteManagerTests`. These remain unimplemented (retention/persistence are follow-up candidates); no future session should mistake the wishlist for shipped work. *(Correction 2026-09-06: Backup retention and TBackupServiceTests were shipped in Phase 4H; hotkey-failure surfacing shipped in 5A; title-in-note-UI shipped in 6E.1. Persisted last-backup time remains unimplemented).*
 
 ### Validation Results (2026-09-02, plain shell — no RAD Studio prompt)
 
@@ -532,7 +509,7 @@ While integrating, a **suspected pre-existing double-open on new notes** was not
 
 - New-note double-open fix (confirmed in 4C; deferred)
 - Monitor-clamp position persistence
-- Backup retention / persisted last-backup time / hotkey-failure surfacing / title-in-note-UI (unimplemented action-plan wishlist items above)
+- Backup retention / persisted last-backup time / hotkey-failure surfacing / title-in-note-UI (unimplemented action-plan wishlist items above - see updated note)
 - SQLite; high-DPI (explicitly excluded from the 4A.5→4D arc)
 
 ## Phase 4E — Note Lifecycle Correctness — COMPLETE + VALIDATED (2026-09-02)
@@ -553,7 +530,7 @@ Tray New Note · `Ctrl+Alt+N` · first-launch auto-note (all via `OnNewNote`) ·
 ### Known Issues / Follow-ups (unchanged by this phase)
 
 - `miDuplicateClick` applies its +30 offset *after* creation, so the duplicate window appears at the default position while the offset persists on the later save. Same class as the double-open; now easily fixable via the new `CreateNote` parameters. Deferred.
-- Backup retention, persisted last-backup time, hotkey-failure surfacing, title-in-note-UI, `TBackupServiceTests` — remain unimplemented (see Phase 4D entry).
+- Backup retention, persisted last-backup time, hotkey-failure surfacing, title-in-note-UI, `TBackupServiceTests` — remain unimplemented (see Phase 4D entry). *(Correction 2026-09-06: Most shipped in 4H/5A/6E.1, see updated note above).*
 - SQLite; high-DPI.
 
 ### Validation Results (2026-09-02, plain shell — no RAD Studio prompt)
@@ -568,11 +545,43 @@ Tray New Note · `Ctrl+Alt+N` · first-launch auto-note (all via `OnNewNote`) ·
 
 ---
 
+## Phase 4F — VCL Styles & Theme Preview Fixes — RECONSTRUCTED
+> RECONSTRUCTED from git history on 2026-09-06 (commits 80502a3..1dd2a73). Not contemporaneous — details come from commit messages and diffs.
+- What changed: Fixed note color rendering under VCL styles. Removed a live theme preview that caused crashes when toggling dark mode.
+- Files changed: `src/Forms/uNoteForm.dfm`, `src/Forms/uSettingsForm.pas`.
+
+## Phase 4G — Application Branding — RECONSTRUCTED
+> RECONSTRUCTED from git history on 2026-09-06 (commit 9e915c1). Not contemporaneous — details come from commit messages and diffs.
+- What changed: Finalized application branding by adding `.ico` and `.png` icons and updating the project file.
+- Files changed: `src/StickyNotes.dproj`, `src/StickyNotes_Icon1.ico`, `src/vnoteicon.png`.
+
+## Phase 4H — Backup Retention & Hotkey Logging — RECONSTRUCTED
+> RECONSTRUCTED from git history on 2026-09-06 (commits f48c02c..2a174c7). Not contemporaneous — details come from commit messages and diffs.
+- What changed: Added backup retention cleanup mechanism and UI configuration in settings. Created comprehensive backup test suites (`TBackupServiceTests.pas` and `TBackupSchedulerTests.pas`). Added logging for hotkey registration failures.
+- Files changed: `src/Forms/uSettingsForm.dfm`, `src/Forms/uSettingsForm.pas`, `src/Models/uSettings.pas`, `src/Services/uBackupService.pas`, `tests/Models/TBackupSchedulerTests.pas`, `tests/Models/TBackupServiceTests.pas`, `src/Application/uNoteEditorContext.pas`, `src/Forms/uNoteForm.pas`, `src/Services/uHotkeyService.pas`.
+
+## Phase 5A — Surface Backup & Hotkey Failures — RECONSTRUCTED
+> RECONSTRUCTED from git history on 2026-09-06 (commit 8cd486b). Not contemporaneous — details come from commit messages and diffs.
+- What changed: Surfaced backup and hotkey registration failures to the user via UI prompts.
+- Files changed: `src/Forms/uTrayForm.pas`, `src/Services/uHotkeyService.pas`.
+
+## Phase 5B — Harden Backup Integrity & Recovery — RECONSTRUCTED
+> RECONSTRUCTED from git history on 2026-09-06 (commit 7f6add3). Not contemporaneous — details come from commit messages and diffs.
+- What changed: Hardened backup integrity and recovery. Crucially, this phase introduced the v3 backup serializer (`schemaVersion: 3`, `Favorite`, `tags`, `checklistItems`), resolving the backup format limitation long before Phase 6D.
+- Files changed: `src/Services/uBackupService.pas`, `tests/Models/TBackupServiceTests.pas`.
+
+## Phase 5D — Rebrand to V-Notes — RECONSTRUCTED
+> RECONSTRUCTED from git history on 2026-09-06 (commit 7179208). Not contemporaneous — details come from commit messages and diffs.
+- What changed: Rebranded the application to "V-Notes" and fixed the layout of the About dialog.
+- Files changed: `README.md`, `src/Forms/uAboutForm.dfm`, `src/Forms/uAboutForm.pas`, `src/Forms/uTrayForm.dfm`, `src/Forms/uTrayForm.pas`, `src/StickyNotes.dpr`, `src/Utils/uSingleInstance.pas`.
+
+---
+
 ## Phase 6A — Model & Storage Layer (Tags & Checklist) — COMPLETE + VALIDATED (2026-09-04)
 
 > **Status:** **COMPLETE + VALIDATED** — schema bumped to v2 (`CURRENT_SCHEMA_VERSION = 2`) in `uJsonStorage.pas`; `TNote` gains `Tags: TArray<string>` + `ChecklistItems: TArray<TChecklistItem>` (+ matching mutators); all three build paths GREEN; **88/88 tests PASS** (81 baseline + 4 new in `TNoteTests` + 3 new in `TJsonStorageTests`), 0 Failed / 0 Errored / 0 Leaked. **UI work completed in Phase 6A Part 2.**
 >
-> **Doc-tracking resume point** — this plan doc had gone stale: the last recorded phase entry was **4E** (2026-09-02), but the actual git history runs through **5A** → **5B** → **5D** (4F, 4G, 4H also present, also unrecorded here). Phases 4F/4G/4H/5A/5B/5D will be back-filled in a separate doc-sync pass; this entry is the first since 4E and therefore also the point at which doc-tracking resumes.
+> **Doc-tracking resume point** — this plan doc had gone stale: the last recorded phase entry was **4E** (2026-09-02), but the actual git history runs through **5A** → **5B** → **5D** (4F, 4G, 4H also present, also unrecorded here). Phases 4F/4G/4H/5A/5B/5D have now been reconstructed above; this entry is the point at which normal doc-tracking resumed.
 
 ### What Changed
 
@@ -813,7 +822,7 @@ The above entry was drafted from a review of the in-tree diff without a local co
 
 ### Known Issue (Carry-forward to a Future Phase)
 
-- **Backup/restore schema gap** — `TBackupService` serializes and deserializes notes using a hardcoded legacy field set (no `schemaVersion`, no `tags`, no `checklistItems`, no `favorite`). A backup taken after Phase 6A/6C changes will restore notes without those fields. Fix: replace the backup serializer with a direct call to `TJsonStorage.NoteToJson` / `JsonToNote`. Deferred; tracked here for future reference.
+- **Backup/restore schema gap** — `TBackupService` serializes and deserializes notes using a hardcoded legacy field set (no `schemaVersion`, no `tags`, no `checklistItems`, no `favorite`). A backup taken after Phase 6A/6C changes will restore notes without those fields. Fix: replace the backup serializer with a direct call to `TJsonStorage.NoteToJson` / `JsonToNote`. Deferred; tracked here for future reference. *(Correction 2026-09-06: The v3 serializer fields were actually added in Phase 5B, well before 6D was written. This entry was factually incorrect).*
 
 ---
 
@@ -955,7 +964,11 @@ Two precision tests added to `tests/Models/TBackupServiceTests.pas`:
 
 > **6E entry said:** "`TBackupService` still uses the legacy serializer; backup → restore drops tags/checklistItems/favorite (carry-forward from Phase 6D, tracked there)."
 
-**RESOLVED — these statements were incorrect.** Code review in Phase 6F confirmed that `uBackupService.pas` already writes `schemaVersion: 3`, `Favorite`, `tags`, and `checklistItems` in `CreateBackupZip`, and reads them with tolerant defaults in `DoRestore`. The gap was documented before the implementation was verified. No corrective action was required.
+**RESOLVED — these statements were incorrect.** Code review in Phase 6F confirmed that `uBackupService.pas` already writes `schemaVersion: 3`, `Favorite`, `tags`, and `checklistItems` in `CreateBackupZip`, and reads them with tolerant defaults in `DoRestore`. The gap was documented before the implementation was verified. *(Correction 2026-09-06: The v3 serializer was implemented in Phase 5B; the 6D entry missed it, leading to this phantom phase).* No corrective action was required.
+
+## Phase 6G — Doc Reconstruction & Claims Audit — COMPLETE + CLOSED (2026-09-06)
+
+> **Status:** **COMPLETE + CLOSED** — Phase 6G audit complete; missing phases reconstructed; stale claims updated with inline corrections; `CLAIMS_LEDGER.md` established. Build: docs only. Commit: `2ce19f9`
 
 ---
 
