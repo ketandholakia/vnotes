@@ -10,6 +10,11 @@ uses
 type
   TBackupProgress = procedure(const AMessage: string; AProgress: Integer) of object;
   TBackupComplete = procedure(ASuccess: Boolean; const AMessage: string) of object;
+  // Fired immediately before/after the active storage is swapped during
+  // Restore (the note manager is re-initialized, which frees every TNote).
+  // The UI must close note windows before the swap and may re-open them
+  // after, otherwise open windows keep dangling TNote references.
+  TStorageSwapEvent = procedure(Sender: TObject) of object;
 
   TBackupService = class
   private
@@ -18,6 +23,8 @@ type
     FBackupPath: string;
     FOnProgress: TBackupProgress;
     FOnComplete: TBackupComplete;
+    FOnBeforeStorageSwap: TStorageSwapEvent;
+    FOnAfterStorageSwap: TStorageSwapEvent;
     FLastBackupFile: string;
     function CreateBackupZip(const AZipFile: string): Boolean;
     procedure DoRestore(const ABackupFile: string; const ALogger: ILogger);
@@ -35,6 +42,8 @@ type
     class function ValidateSQLiteDatabase(const ADbPath: string; const ALogger: ILogger): Boolean;
     property OnProgress: TBackupProgress read FOnProgress write FOnProgress;
     property OnComplete: TBackupComplete read FOnComplete write FOnComplete;
+    property OnBeforeStorageSwap: TStorageSwapEvent read FOnBeforeStorageSwap write FOnBeforeStorageSwap;
+    property OnAfterStorageSwap: TStorageSwapEvent read FOnAfterStorageSwap write FOnAfterStorageSwap;
   end;
 
 implementation
@@ -465,9 +474,16 @@ begin
         SqlStorage.Free;
       end;
 
-      // Safely replace AppDbPath with TempDbFile
+      // Safely replace AppDbPath with TempDbFile. The swap re-initializes
+      // the note manager and frees every TNote it owns, so open note
+      // windows must be closed first (OnBeforeStorageSwap) and are
+      // re-opened after (OnAfterStorageSwap).
       if FNoteManager <> nil then
+      begin
+        if Assigned(FOnBeforeStorageSwap) then
+          FOnBeforeStorageSwap(Self);
         FNoteManager.Finalize;
+      end;
       try
         if TFile.Exists(AppDbPath) then
         begin
@@ -496,7 +512,11 @@ begin
         end;
       finally
         if FNoteManager <> nil then
+        begin
           FNoteManager.Initialize;
+          if Assigned(FOnAfterStorageSwap) then
+            FOnAfterStorageSwap(Self);
+        end;
       end;
     end;
 
@@ -725,7 +745,11 @@ begin
         if MigResult.Success and ValidateSQLiteDatabase(TempDbFile, ALogger) then
         begin
           if FNoteManager <> nil then
+          begin
+            if Assigned(FOnBeforeStorageSwap) then
+              FOnBeforeStorageSwap(Self);
             FNoteManager.Finalize;
+          end;
           try
             if TFile.Exists(AppDbPath) then
             begin
@@ -753,7 +777,11 @@ begin
             end;
           finally
             if FNoteManager <> nil then
+            begin
               FNoteManager.Initialize;
+              if Assigned(FOnAfterStorageSwap) then
+                FOnAfterStorageSwap(Self);
+            end;
           end;
         end;
       end;

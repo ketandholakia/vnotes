@@ -129,11 +129,16 @@ end;
 
 procedure TNoteApplication.Shutdown;
 begin
+  // Every field is guarded: if the constructor raised partway through
+  // (e.g. storage migration failure), Destroy still runs Shutdown, and an
+  // unguarded call here crashed with an AV that masked the original error.
   if FBackupScheduler <> nil then
     FBackupScheduler.Stop;
-  FAutosaveService.Flush;
+  if FAutosaveService <> nil then
+    FAutosaveService.Flush;
   SaveSettings;
-  FNoteManager.Finalize;
+  if FNoteManager <> nil then
+    FNoteManager.Finalize;
 end;
 
 procedure TNoteApplication.RefreshBackupSchedule;
@@ -162,12 +167,14 @@ end;
 
 procedure TNoteApplication.LoadSettings;
 begin
+  if FSettingsController = nil then Exit;
   FSettingsController.LoadSettings;
   FSettingsController.ApplyToApplication;
 end;
 
 procedure TNoteApplication.SaveSettings;
 begin
+  if FSettingsController = nil then Exit;
   FSettingsController.SaveSettings;
 end;
 

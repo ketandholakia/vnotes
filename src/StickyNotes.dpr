@@ -33,7 +33,12 @@ uses
   uJsonUtils in 'Utils\uJsonUtils.pas',
   uColorUtils in 'Utils\uColorUtils.pas',
   uILogger in 'Utils\uILogger.pas',
-  uSingleInstance in 'Utils\uSingleInstance.pas';
+  uSingleInstance in 'Utils\uSingleInstance.pas',
+  uNoteHeaderBar in 'Components\uNoteHeaderBar.pas',
+  uNoteColorPicker in 'Components\uNoteColorPicker.pas',
+  uNoteTagStrip in 'Components\uNoteTagStrip.pas',
+  uNoteChecklistPanel in 'Components\uNoteChecklistPanel.pas',
+  uNoteScrollBar in 'Components\uNoteScrollBar.pas';
 
 {$R *.res}
 // VCL styles (Windows10, Windows10 Blue, Windows10 Dark) are embedded in the

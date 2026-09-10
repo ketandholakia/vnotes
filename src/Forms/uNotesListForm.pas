@@ -18,7 +18,17 @@ uses
   Winapi.Windows, System.SysUtils, System.Classes,
   System.Generics.Collections,
   Vcl.Graphics, Vcl.Controls, Vcl.Forms, Vcl.StdCtrls, Vcl.ComCtrls,
-  uNote, uNoteManager, uNoteQuery, System.StrUtils;
+  VirtualTrees, uNote, uNoteManager, uNoteQuery, System.StrUtils, uEnums;
+
+type
+  TNodeKind = (nkGroup, nkNote);
+  
+  PNoteNodeData = ^TNoteNodeData;
+  TNoteNodeData = record
+    NodeKind: TNodeKind;
+    ColorGroup: TNoteColor;
+    Note: TNote;
+  end;
 
 type
   TOpenNoteEvent = procedure(ANote: TNote) of object;
@@ -26,7 +36,7 @@ type
   TNotesListForm = class(TForm)
     edSearch: TEdit;
     cbTagFilter: TComboBox;
-    lvNotes: TListView;
+    vstNotes: TVirtualStringTree;
     btnOpen: TButton;
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
@@ -34,7 +44,12 @@ type
     procedure FormKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);
     procedure edSearchChange(Sender: TObject);
     procedure cbTagFilterChange(Sender: TObject);
-    procedure lvNotesDblClick(Sender: TObject);
+    procedure vstNotesBeforeCellPaint(Sender: TBaseVirtualTree; TargetCanvas: TCanvas; Node: PVirtualNode; Column: TColumnIndex; CellPaintMode: TVTCellPaintMode; CellRect: TRect; var ContentRect: TRect);
+    procedure vstNotesDblClick(Sender: TObject);
+    procedure vstNotesFreeNode(Sender: TBaseVirtualTree; Node: PVirtualNode);
+    procedure vstNotesGetText(Sender: TBaseVirtualTree; Node: PVirtualNode; Column: TColumnIndex; TextType: TVSTTextType; var CellText: string);
+    procedure vstNotesGetNodeDataSize(Sender: TBaseVirtualTree; var NodeDataSize: Integer);
+    procedure vstNotesInitNode(Sender: TBaseVirtualTree; ParentNode, Node: PVirtualNode; var InitialStates: TVirtualNodeInitStates);
     procedure btnOpenClick(Sender: TObject);
   private
     FNoteManager: TNoteManager;
@@ -111,7 +126,7 @@ begin
   RefreshList;
 end;
 
-procedure TNotesListForm.lvNotesDblClick(Sender: TObject);
+procedure TNotesListForm.vstNotesDblClick(Sender: TObject);
 begin
   OpenSelected;
 end;
@@ -122,11 +137,119 @@ begin
 end;
 
 function TNotesListForm.SelectedNote: TNote;
+var
+  Node: PVirtualNode;
+  Data: PNoteNodeData;
 begin
-  if lvNotes.Selected <> nil then
-    Result := TNote(lvNotes.Selected.Data)
-  else
-    Result := nil;
+  Result := nil;
+  Node := vstNotes.GetFirstSelected;
+  if Assigned(Node) then
+  begin
+    Data := vstNotes.GetNodeData(Node);
+    if Assigned(Data) and (Data^.NodeKind = nkNote) then
+      Result := Data^.Note;
+  end;
+end;
+
+procedure TNotesListForm.vstNotesBeforeCellPaint(Sender: TBaseVirtualTree; TargetCanvas: TCanvas; Node: PVirtualNode; Column: TColumnIndex; CellPaintMode: TVTCellPaintMode; CellRect: TRect; var ContentRect: TRect);
+var
+  Data: PNoteNodeData;
+begin
+  Data := Sender.GetNodeData(Node);
+  if not Assigned(Data) then Exit;
+  
+  if Data^.NodeKind = nkGroup then
+  begin
+    case Data^.ColorGroup of
+      ncYellow: TargetCanvas.Brush.Color := $00E6FFFF; // Light yellow
+      ncGreen:  TargetCanvas.Brush.Color := $00E6FFE6; // Light green
+      ncBlue:   TargetCanvas.Brush.Color := $00FFE6E6; // Light blue
+      ncPink:   TargetCanvas.Brush.Color := $00FFE6FF; // Light pink
+      ncPurple: TargetCanvas.Brush.Color := $00FAE6FF; // Light purple
+      ncWhite:  TargetCanvas.Brush.Color := clWindow;
+    end;
+    TargetCanvas.FillRect(CellRect);
+  end;
+end;
+
+procedure TNotesListForm.vstNotesFreeNode(Sender: TBaseVirtualTree; Node: PVirtualNode);
+begin
+  // Nothing to free since TNote is managed by TNoteManager
+end;
+
+procedure TNotesListForm.vstNotesGetNodeDataSize(Sender: TBaseVirtualTree; var NodeDataSize: Integer);
+begin
+  NodeDataSize := SizeOf(TNoteNodeData);
+end;
+
+procedure TNotesListForm.vstNotesInitNode(Sender: TBaseVirtualTree; ParentNode, Node: PVirtualNode; var InitialStates: TVirtualNodeInitStates);
+begin
+  // Handled manually during AddChild in RefreshList
+end;
+
+procedure TNotesListForm.vstNotesGetText(Sender: TBaseVirtualTree; Node: PVirtualNode; Column: TColumnIndex; TextType: TVSTTextType; var CellText: string);
+var
+  Data: PNoteNodeData;
+  Note: TNote;
+  ColorName: string;
+  Emoji: string;
+begin
+  Data := Sender.GetNodeData(Node);
+  if not Assigned(Data) then Exit;
+  
+  if Data^.NodeKind = nkGroup then
+  begin
+    if Column = 0 then
+    begin
+      case Data^.ColorGroup of
+        ncYellow: ColorName := 'Ideas (Yellow)';
+        ncGreen:  ColorName := 'Work (Green)';
+        ncBlue:   ColorName := 'Personal (Blue)';
+        ncPink:   ColorName := 'Urgent (Pink)';
+        ncPurple: ColorName := 'Misc (Purple)';
+        ncWhite:  ColorName := 'Drafts (White)';
+      end;
+      CellText := Format('📁 %s - %d Notes', [ColorName, Sender.ChildCount[Node]]);
+    end
+    else
+      CellText := '';
+    Exit;
+  end;
+  
+  Note := Data^.Note;
+  if not Assigned(Note) then Exit;
+  
+  case Column of
+    0: CellText := ' 📌';
+    1: 
+      if Note.Title = '' then
+        CellText := '(untitled)'
+      else
+        CellText := Note.Title;
+    2: CellText := FormatDateTime('dd mmm yyyy', Note.UpdatedAt);
+    3: 
+      if Note.ChecklistTotalCount > 0 then
+        CellText := '✅ Checklist'
+      else
+        CellText := '📝 Memo';
+    4:
+      if Length(Note.Tags) > 0 then
+        CellText := '[' + String.Join(', ', Note.Tags) + ']'
+      else
+        CellText := '';
+    5:
+      begin
+        case Note.Color of
+          ncYellow: Emoji := '🟨';
+          ncGreen:  Emoji := '🟩';
+          ncBlue:   Emoji := '🟦';
+          ncPink:   Emoji := '🟪'; // pink/purple block
+          ncPurple: Emoji := '🟪';
+          ncWhite:  Emoji := '⬜';
+        end;
+        CellText := Emoji;
+      end;
+  end;
 end;
 
 procedure TNotesListForm.OpenSelected;
@@ -200,28 +323,23 @@ var
   Results: TObjectList<TNote>;
   TagResults: TObjectList<TNote>;
   Note: TNote;
-  Item: TListItem;
   I: Integer;
   Tag: string;
+  ColorsPresent: TList<TNoteColor>;
+  Color: TNoteColor;
+  ParentNode, ChildNode: PVirtualNode;
+  Data: PNoteNodeData;
 begin
   if (FNoteManager = nil) or (FQuery = nil) then
     Exit;
 
-  // Phase 6B.2: keep the tag filter options in sync with the collection.
   RefreshTagFilter;
 
-  // Snapshot of manager-owned notes: OwnsObjects = False, the manager
-  // remains the sole owner throughout.
   Source := TObjectList<TNote>.Create(False);
   try
     for I := 0 to FNoteManager.NoteCount - 1 do
       Source.Add(FNoteManager.Notes[I]);
 
-    // Phase 6B.2: compose tag filter + text search via the query layer.
-    // Tag selected -> FilterByTag first, then the existing Search narrows
-    // that set. Tag = All -> plain Search, exactly as before. Both paths
-    // return query-layer ordered results (UpdatedAt DESC, ID DESC); the UI
-    // never re-sorts and never filters by itself.
     Tag := SelectedTag;
     if Tag <> '' then
     begin
@@ -229,51 +347,59 @@ begin
       try
         Results := FQuery.Search(edSearch.Text, TagResults);
       finally
-        TagResults.Free;  // OwnsObjects = False: notes survive
+        TagResults.Free;
       end;
     end
     else
       Results := FQuery.Search(edSearch.Text, Source);
+      
     try
       FResults.Clear;
-      lvNotes.Items.BeginUpdate;
+      for Note in Results do
+        FResults.Add(Note);
+        
+      vstNotes.BeginUpdate;
       try
-        lvNotes.Items.Clear;
-        for Note in Results do
-        begin
-          FResults.Add(Note);
-          Item := lvNotes.Items.Add;
-          if Note.Title = '' then
-            Item.Caption := '(untitled)'
-          else
-            Item.Caption := Note.Title;
-          Item.SubItems.Add(FormatDateTime('yyyy-mm-dd hh:nn', Note.UpdatedAt));
-
-          // Phase 6B.2: tags AND checklist progress render independently -
-          // a note carrying both shows both. Phase 6C.2 adds the Favorite
-          // star as a fourth subitem. Columns align because every row adds
-          // exactly four subitems.
-          if Length(Note.Tags) > 0 then
-            Item.SubItems.Add(String.Join(', ', Note.Tags))
-          else
-            Item.SubItems.Add('');
-          Item.SubItems.Add(Format('%d/%d',
-            [Note.ChecklistDoneCount, Note.ChecklistTotalCount]));
-          if Note.Favorite then
-            Item.SubItems.Add('★')
-          else
-            Item.SubItems.Add('');
-
-          Item.Data := Pointer(Note);  // display-only reference, NOT owned
+        vstNotes.Clear;
+        
+        ColorsPresent := TList<TNoteColor>.Create;
+        try
+          for Note in FResults do
+            if not ColorsPresent.Contains(Note.Color) then
+              ColorsPresent.Add(Note.Color);
+              
+          for Color in ColorsPresent do
+          begin
+            ParentNode := vstNotes.AddChild(nil);
+            Data := vstNotes.GetNodeData(ParentNode);
+            Data^.NodeKind := nkGroup;
+            Data^.ColorGroup := Color;
+            Data^.Note := nil;
+            
+            for Note in FResults do
+            begin
+              if Note.Color = Color then
+              begin
+                ChildNode := vstNotes.AddChild(ParentNode);
+                Data := vstNotes.GetNodeData(ChildNode);
+                Data^.NodeKind := nkNote;
+                Data^.Note := Note;
+              end;
+            end;
+          end;
+        finally
+          ColorsPresent.Free;
         end;
+        
+        vstNotes.FullExpand;
       finally
-        lvNotes.Items.EndUpdate;
+        vstNotes.EndUpdate;
       end;
     finally
-      Results.Free;  // OwnsObjects = False: notes survive
+      Results.Free;
     end;
   finally
-    Source.Free;     // OwnsObjects = False: notes survive
+    Source.Free;
   end;
 end;
 

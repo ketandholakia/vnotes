@@ -18,6 +18,10 @@ type
     FOnNoteDeleted: TNoteEvent;
     function GetNoteCount: Integer;
     function GetNote(Index: Integer): TNote;
+    // Internal write-through to storage without Touch (see implementation).
+    // Used by SaveNote (after Touch) and by CreateNote/AddNote so created,
+    // imported and restored notes keep their original timestamps.
+    procedure PersistNote(const ANote: TNote);
   public
     constructor Create(const AStorage: INoteStorage);
     destructor Destroy; override;
@@ -100,7 +104,7 @@ begin
   Result.Height := AHeight;
   Result.AlwaysOnTop := AAlwaysOnTop;
   FNotes.Add(Result);
-  SaveNote(Result);
+  PersistNote(Result);
   if Assigned(FOnNoteCreated) then
     FOnNoteCreated(Result);
 end;
@@ -114,7 +118,9 @@ begin
   if FindByID(ANote.ID) <> nil then Exit; // already present, caller should free it
 
   FNotes.Add(ANote);
-  SaveNote(ANote); // persists via storage and fires OnNoteChanged
+  // Persists via storage and fires OnNoteChanged; PersistNote (not SaveNote)
+  // so an imported/restored note keeps its original UpdatedAt.
+  PersistNote(ANote);
   if Assigned(FOnNoteCreated) then
     FOnNoteCreated(ANote);
   Result := True;
@@ -123,20 +129,26 @@ end;
 function TNoteManager.DeleteNote(const ANoteID: Int64): Boolean;
 var
   Note: TNote;
-  Index: Integer;
 begin
   Result := False;
   Note := FindByID(ANoteID);
   if Note = nil then Exit;
-  
-  Index := FNotes.IndexOf(Note);
-  if Index < 0 then Exit;
-  
+
   if FStorage.DeleteNote(ANoteID) then
   begin
-    if Assigned(FOnNoteDeleted) then
-      FOnNoteDeleted(Note);
-    FNotes.Delete(Index);
+    // Take the note out of the owned list WITHOUT freeing it yet (Extract
+    // transfers the object out; Delete would free it), so OnNoteDeleted
+    // handlers still receive a valid object - TTrayForm closes the note
+    // window from inside this event. The old order (notify first, remove
+    // after) let the closing window's FormClose save the note straight
+    // back into storage, resurrecting the just-deleted note.
+    FNotes.Extract(Note);
+    try
+      if Assigned(FOnNoteDeleted) then
+        FOnNoteDeleted(Note);
+    finally
+      Note.Free;
+    end;
     Result := True;
   end;
 end;
@@ -161,9 +173,25 @@ end;
 
 procedure TNoteManager.SaveNote(const ANote: TNote);
 begin
+  // Membership guard: never persist a note the manager no longer owns.
+  // This is what stops a closing note window (FormClose saves
+  // unconditionally) from resurrecting a note that was just deleted; it
+  // also makes a late autosave of a deleted note a harmless no-op.
+  if (ANote = nil) or (FNotes.IndexOf(ANote) < 0) then
+    Exit;
+
+  // Touch BEFORE persisting so the stored UpdatedAt is the timestamp of
+  // this save; the old order (save, then Touch) wrote the previous save's
+  // timestamp to disk, so memory and storage disagreed between saves.
+  ANote.Touch;
+
+  PersistNote(ANote);
+end;
+
+procedure TNoteManager.PersistNote(const ANote: TNote);
+begin
   if FStorage.SaveNote(ANote) then
   begin
-    ANote.Touch;
     if Assigned(FOnNoteChanged) then
       FOnNoteChanged(ANote);
   end;

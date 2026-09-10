@@ -1,4 +1,4 @@
-﻿unit uTrayForm;
+unit uTrayForm;
 
 interface
 
@@ -6,6 +6,7 @@ uses
   Winapi.Windows, Winapi.Messages, Winapi.ShlObj, System.SysUtils, System.Classes,
   System.Generics.Collections,
   Vcl.Graphics, Vcl.Controls, Vcl.Forms, Vcl.Dialogs, Vcl.ExtCtrls, Vcl.Menus,
+  System.Generics.Defaults, uEnums,
   uNote, uNoteManager, uSettings, uSettingsController,
   uAutosaveService, uHotkeyService, uThemeService, uBackupService,
   uStorage, uNoteQuery, uNoteForm, uNoteApplication, uNoteEditorContext,
@@ -17,6 +18,11 @@ type
     pmTray: TPopupMenu;
     miNewNote: TMenuItem;
     miOpenNotes: TMenuItem;
+    miArrangeNotes: TMenuItem;
+    miArrangeCascade: TMenuItem;
+    miArrangeGrid: TMenuItem;
+    miArrangeByColor: TMenuItem;
+    miArrangeByTag: TMenuItem;
     N1: TMenuItem;
     miSettings: TMenuItem;
     miBackup: TMenuItem;
@@ -28,6 +34,10 @@ type
     procedure FormDestroy(Sender: TObject);
     procedure miNewNoteClick(Sender: TObject);
     procedure miOpenNotesClick(Sender: TObject);
+    procedure miArrangeCascadeClick(Sender: TObject);
+    procedure miArrangeGridClick(Sender: TObject);
+    procedure miArrangeByColorClick(Sender: TObject);
+    procedure miArrangeByTagClick(Sender: TObject);
     procedure miSettingsClick(Sender: TObject);
     procedure miBackupClick(Sender: TObject);
     procedure miRestoreClick(Sender: TObject);
@@ -53,6 +63,11 @@ type
     procedure BackupProgress(const AMessage: string; AProgress: Integer);
     procedure BackupComplete(ASuccess: Boolean; const AMessage: string);
     procedure RestoreComplete(ASuccess: Boolean; const AMessage: string);
+    // Storage-swap guards: the restore path replaces vnotes.db and
+    // re-initializes the note manager, which frees every TNote. Open note
+    // windows must be closed before the swap and are re-opened after it.
+    procedure BackupBeforeStorageSwap(Sender: TObject);
+    procedure BackupAfterStorageSwap(Sender: TObject);
     procedure OnAbout(Sender: TObject);
     procedure OnExit(Sender: TObject);
     procedure OnNoteCreated(const ANote: TNote);
@@ -101,6 +116,8 @@ begin
   // Wire backup service callbacks for user feedback
   FApplication.BackupService.OnProgress := BackupProgress;
   FApplication.BackupService.OnComplete := BackupComplete;
+  FApplication.BackupService.OnBeforeStorageSwap := BackupBeforeStorageSwap;
+  FApplication.BackupService.OnAfterStorageSwap := BackupAfterStorageSwap;
   // Initialize (loads settings, storage, notes)
   FApplication.Initialize;
 
@@ -223,6 +240,9 @@ begin
         SettingsForm.SaveSettings(FApplication.Settings);
         FApplication.ThemeService.SetDarkTheme(FApplication.Settings.DarkTheme);
         FApplication.AutosaveService.Delay := FApplication.Settings.AutosaveDelay;
+        
+        for var Form in FNoteForms do
+          Form.ApplyFontSettings;
 
         // Update hotkeys
         if FApplication.Settings.EnableHotkeys then
@@ -289,6 +309,7 @@ end;
 procedure TTrayForm.OnRestore(Sender: TObject);
 var
   OpenDialog: TOpenDialog;
+  PrevComplete: TBackupComplete;
 begin
   OpenDialog := TOpenDialog.Create(Self);
   try
@@ -296,17 +317,24 @@ begin
     OpenDialog.Filter := 'Backup files (*.zip)|*.zip';
     if OpenDialog.Execute then
     begin
+      // Swap in the restore completion handler for the duration of the
+      // restore only. Leaving it installed made every later backup (manual
+      // or scheduled) report through the restore dialog path.
+      PrevComplete := FApplication.BackupService.OnComplete;
+      FApplication.BackupService.OnComplete := RestoreComplete;
       try
-        // Wire up restore callback for user feedback
-        FApplication.BackupService.OnComplete := RestoreComplete;
-        FApplication.BackupService.Restore(OpenDialog.FileName);
-      except
-        on E: Exception do
-        begin
-          Application.MessageBox(PChar('Failed to restore backup: ' + E.Message),
-            'Restore Error', MB_OK or MB_ICONERROR or MB_DEFBUTTON1);
-          tiMain.Hint := 'Restore failed';
+        try
+          FApplication.BackupService.Restore(OpenDialog.FileName);
+        except
+          on E: Exception do
+          begin
+            Application.MessageBox(PChar('Failed to restore backup: ' + E.Message),
+              'Restore Error', MB_OK or MB_ICONERROR or MB_DEFBUTTON1);
+            tiMain.Hint := 'Restore failed';
+          end;
         end;
+      finally
+        FApplication.BackupService.OnComplete := PrevComplete;
       end;
     end;
   finally
@@ -328,6 +356,21 @@ begin
       'Restore Error', MB_OK or MB_ICONERROR or MB_DEFBUTTON1);
     tiMain.Hint := 'Restore failed: ' + AMessage;
   end;
+end;
+
+procedure TTrayForm.BackupBeforeStorageSwap(Sender: TObject);
+begin
+  // The storage swap re-initializes the note manager and frees every TNote;
+  // open note windows hold direct references to those objects and must be
+  // closed first, otherwise they become use-after-free dangling windows.
+  CloseAllNotes;
+end;
+
+procedure TTrayForm.BackupAfterStorageSwap(Sender: TObject);
+begin
+  // The manager has been re-initialized against the restored storage;
+  // re-open note windows for the restored notes.
+  OpenAllNotes;
 end;
 
 procedure TTrayForm.OnAbout(Sender: TObject);
@@ -374,8 +417,12 @@ begin
     Form := FNoteForms[I];
     if Form.Note = ANote then
     begin
+      // CloseWithoutSaving triggers FormClose -> OnClosed -> NoteFormClosed,
+      // which already removes the form from FNoteForms. The extra
+      // FNoteForms.Delete(I) that used to follow ran on a stale index: it
+      // raised "list index out of bounds" when the closed window was last
+      // in the list, and untracked the WRONG window otherwise.
       Form.CloseWithoutSaving;
-      FNoteForms.Delete(I);
       Break;
     end;
   end;
@@ -505,6 +552,202 @@ end;
 procedure TTrayForm.miOpenNotesClick(Sender: TObject);
 begin
   OnOpenNotesList(Sender);
+end;
+
+procedure TTrayForm.miArrangeCascadeClick(Sender: TObject);
+var
+  Form: TNoteForm;
+  L, T, W, H: Integer;
+begin
+  if FNoteForms.Count = 0 then Exit;
+  L := 50; T := 50;
+  W := FApplication.Settings.DefaultWidth;
+  H := FApplication.Settings.DefaultHeight;
+  
+  for Form in FNoteForms do
+  begin
+    Form.SetBounds(L, T, W, H);
+    Form.Note.Left := L;
+    Form.Note.Top := T;
+    Form.Note.Width := W;
+    Form.Note.Height := H;
+    FApplication.NoteManager.SaveNote(Form.Note);
+    
+    Inc(L, 25);
+    Inc(T, 25);
+    
+    // Basic wrapping if it goes too far off screen
+    if L > Screen.WorkAreaRect.Right - W - 50 then L := 50;
+    if T > Screen.WorkAreaRect.Bottom - H - 50 then T := 50;
+  end;
+end;
+
+procedure TTrayForm.miArrangeGridClick(Sender: TObject);
+var
+  Form: TNoteForm;
+  Cols, Rows, Col, Row, CellW, CellH, Cnt, Idx: Integer;
+begin
+  Cnt := FNoteForms.Count;
+  if Cnt = 0 then Exit;
+  
+  // Try to find a roughly square grid
+  Cols := Trunc(Sqrt(Cnt));
+  if Cols < 1 then Cols := 1;
+  Rows := (Cnt + Cols - 1) div Cols;
+  
+  // Adjust if aspect ratio is very wide
+  if (Screen.WorkAreaWidth > Screen.WorkAreaHeight * 1.5) and (Rows > 1) then
+  begin
+    Cols := Rows;
+    Rows := (Cnt + Cols - 1) div Cols;
+  end;
+  
+  CellW := Screen.WorkAreaWidth div Cols;
+  CellH := Screen.WorkAreaHeight div Rows;
+  
+  for Idx := 0 to Cnt - 1 do
+  begin
+    Form := FNoteForms[Idx];
+    Col := Idx mod Cols;
+    Row := Idx div Cols;
+    
+    Form.SetBounds(
+      Screen.WorkAreaRect.Left + Col * CellW,
+      Screen.WorkAreaRect.Top + Row * CellH,
+      CellW, CellH
+    );
+    
+    Form.Note.Left := Form.Left;
+    Form.Note.Top := Form.Top;
+    Form.Note.Width := Form.Width;
+    Form.Note.Height := Form.Height;
+    FApplication.NoteManager.SaveNote(Form.Note);
+  end;
+end;
+
+procedure TTrayForm.miArrangeByColorClick(Sender: TObject);
+var
+  Form: TNoteForm;
+  SortedForms: TList<TNoteForm>;
+  CurrentColor: TNoteColor;
+  L, T, W, H: Integer;
+begin
+  if FNoteForms.Count = 0 then Exit;
+  
+  SortedForms := TList<TNoteForm>.Create;
+  try
+    SortedForms.AddRange(FNoteForms);
+    SortedForms.Sort(TComparer<TNoteForm>.Construct(
+      function(const L, R: TNoteForm): Integer
+      begin
+        Result := Ord(L.Note.Color) - Ord(R.Note.Color);
+      end
+    ));
+    
+    W := FApplication.Settings.DefaultWidth;
+    H := FApplication.Settings.DefaultHeight;
+    
+    L := 50; T := 50;
+    if SortedForms.Count > 0 then
+      CurrentColor := SortedForms[0].Note.Color;
+      
+    for Form in SortedForms do
+    begin
+      // When color changes, shift to a new starting point
+      if Form.Note.Color <> CurrentColor then
+      begin
+        CurrentColor := Form.Note.Color;
+        L := L + W + 50;
+        T := 50;
+        if L > Screen.WorkAreaRect.Right - W then
+        begin
+          L := 50;
+          Inc(T, H + 50);
+        end;
+      end;
+      
+      Form.SetBounds(L, T, W, H);
+      Form.Note.Left := L;
+      Form.Note.Top := T;
+      Form.Note.Width := W;
+      Form.Note.Height := H;
+      FApplication.NoteManager.SaveNote(Form.Note);
+      
+      Inc(L, 25);
+      Inc(T, 25);
+    end;
+  finally
+    SortedForms.Free;
+  end;
+end;
+
+procedure TTrayForm.miArrangeByTagClick(Sender: TObject);
+var
+  Form: TNoteForm;
+  SortedForms: TList<TNoteForm>;
+  CurrentTag, ThisTag: string;
+  L, T, W, H: Integer;
+begin
+  if FNoteForms.Count = 0 then Exit;
+  
+  SortedForms := TList<TNoteForm>.Create;
+  try
+    SortedForms.AddRange(FNoteForms);
+    SortedForms.Sort(TComparer<TNoteForm>.Construct(
+      function(const L, R: TNoteForm): Integer
+      var
+        LTag, RTag: string;
+      begin
+        if Length(L.Note.Tags) > 0 then LTag := L.Note.Tags[0] else LTag := '';
+        if Length(R.Note.Tags) > 0 then RTag := R.Note.Tags[0] else RTag := '';
+        Result := CompareText(LTag, RTag);
+      end
+    ));
+    
+    W := FApplication.Settings.DefaultWidth;
+    H := FApplication.Settings.DefaultHeight;
+    
+    L := 50; T := 50;
+    if SortedForms.Count > 0 then
+    begin
+      if Length(SortedForms[0].Note.Tags) > 0 then
+        CurrentTag := SortedForms[0].Note.Tags[0]
+      else
+        CurrentTag := '';
+    end;
+      
+    for Form in SortedForms do
+    begin
+      if Length(Form.Note.Tags) > 0 then
+        ThisTag := Form.Note.Tags[0]
+      else
+        ThisTag := '';
+        
+      if ThisTag <> CurrentTag then
+      begin
+        CurrentTag := ThisTag;
+        L := L + W + 50;
+        T := 50;
+        if L > Screen.WorkAreaRect.Right - W then
+        begin
+          L := 50;
+          Inc(T, H + 50);
+        end;
+      end;
+      
+      Form.SetBounds(L, T, W, H);
+      Form.Note.Left := L;
+      Form.Note.Top := T;
+      Form.Note.Width := W;
+      Form.Note.Height := H;
+      FApplication.NoteManager.SaveNote(Form.Note);
+      
+      Inc(L, 25);
+      Inc(T, 25);
+    end;
+  finally
+    SortedForms.Free;
+  end;
 end;
 
 procedure TTrayForm.miSettingsClick(Sender: TObject);

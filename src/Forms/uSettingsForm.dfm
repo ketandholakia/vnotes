@@ -135,8 +135,8 @@ object SettingsForm: TSettingsForm
         Left = 16
         Top = 16
         Width = 441
-        Height = 105
-        Caption = 'Theme'
+        Height = 153
+        Caption = 'Theme & Font'
         TabOrder = 0
         object chkDarkTheme: TCheckBox
           Left = 16
@@ -146,6 +146,37 @@ object SettingsForm: TSettingsForm
           Caption = 'Dark theme'
           TabOrder = 0
           OnClick = chkDarkThemeClick
+        end
+        object chkAutoHideToolbar: TCheckBox
+          Left = 16
+          Top = 56
+          Width = 200
+          Height = 17
+          Caption = 'Auto-hide Toolbar'
+          TabOrder = 1
+        end
+        object lblFontSettings: TLabel
+          Left = 16
+          Top = 88
+          Width = 72
+          Height = 15
+          Caption = 'Note Font:'
+        end
+        object lblCurrentFont: TLabel
+          Left = 112
+          Top = 88
+          Width = 80
+          Height = 15
+          Caption = 'Segoe UI, 10 pt'
+        end
+        object btnChooseFont: TButton
+          Left = 16
+          Top = 112
+          Width = 90
+          Height = 25
+          Caption = 'Choose...'
+          TabOrder = 2
+          OnClick = btnChooseFontClick
         end
       end
     end
@@ -297,5 +328,14 @@ object SettingsForm: TSettingsForm
       TabOrder = 2
       OnClick = btnApplyClick
     end
+  end
+  object dlgFont: TFontDialog
+    Font.Charset = DEFAULT_CHARSET
+    Font.Color = clWindowText
+    Font.Height = -12
+    Font.Name = 'Segoe UI'
+    Font.Style = []
+    Left = 440
+    Top = 16
   end
 end

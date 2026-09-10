@@ -39,7 +39,7 @@ REM -U unit search path (covers .pas files referenced via plain
 REM   `uses xxx;` in units that are themselves pulled in by the DPR),
 REM -N .dcu output dir.
 REM (redundant hard-coded D:\ketan\...\src\Utils path dropped for portability)
-dcc32 -B -Q -M -U.;Models;Controllers;Storage;Services;Utils;Forms -NWin32\Debug StickyNotes.dpr 2>&1
+dcc32 -B -Q -M -U.;Models;Controllers;Storage;Services;Utils;Forms;Components;Application;"D:\delphi\vcl\Athens_vcl\03_Virtual-TreeView-8.3\Source" -NWin32\Debug StickyNotes.dpr 2>&1
 
 exit /b %ERRORLEVEL%
 

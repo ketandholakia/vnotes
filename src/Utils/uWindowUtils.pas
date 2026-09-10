@@ -294,8 +294,11 @@ begin
   inherited;
   if (Operation = opRemove) and (AComponent = FControl) then
   begin
-    if FControl.HandleAllocated then
-      FControl.WindowProc := FOrigProc;
+    // Do not attempt to restore WindowProc if the control is being destroyed;
+    // TWinControl.Destroy has already executed by the time Notification(opRemove) runs,
+    // so touching HandleAllocated or WindowProc here can cause an Invalid Pointer.
+    // if FControl.HandleAllocated then
+    //   FControl.WindowProc := FOrigProc;
     FControl := nil;
     Key := nil;
     Found := False;

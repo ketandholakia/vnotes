@@ -43,38 +43,54 @@ object NotesListForm: TNotesListForm
       'All Tags'
     )
   end
-  object lvNotes: TListView
+  object vstNotes: TVirtualStringTree
     Left = 8
     Top = 66
     Width = 328
     Height = 299
     Anchors = [akLeft, akTop, akRight, akBottom]
+    Header.AutoSizeIndex = 0
+    Header.Options = [hoColumnResize, hoDrag, hoShowSortGlyphs, hoVisible]
+    TabOrder = 1
+    TreeOptions.PaintOptions = [toShowButtons, toShowDropmark, toShowRoot, toShowTreeLines, toThemeAware, toUseBlendedImages]
+    TreeOptions.SelectionOptions = [toFullRowSelect]
+    OnBeforeCellPaint = vstNotesBeforeCellPaint
+    OnDblClick = vstNotesDblClick
+    OnFreeNode = vstNotesFreeNode
+    OnGetText = vstNotesGetText
+    OnGetNodeDataSize = vstNotesGetNodeDataSize
+    OnInitNode = vstNotesInitNode
     Columns = <
       item
-        Caption = 'Title'
+        Position = 0
+        Text = 'Color/Folder'
+        Width = 180
+      end
+      item
+        Position = 1
+        Text = 'Title'
+        Width = 150
+      end
+      item
+        Position = 2
+        Text = 'Date Created'
         Width = 100
       end
       item
-        Caption = 'Modified'
-        Width = 95
+        Position = 3
+        Text = 'Note Type'
+        Width = 100
       end
       item
-        Caption = 'Tags'
-        Width = 75
+        Position = 4
+        Text = 'Tags'
+        Width = 150
       end
       item
-        Caption = 'Checklist'
-        Width = 65
-      end
-      item
-        Caption = #9733
-        Width = 30
+        Position = 5
+        Text = 'Color'
+        Width = 50
       end>
-    HideSelection = False
-    RowSelect = True
-    TabOrder = 1
-    ViewStyle = vsReport
-    OnDblClick = lvNotesDblClick
   end
   object btnOpen: TButton
     Left = 236

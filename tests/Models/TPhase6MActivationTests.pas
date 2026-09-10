@@ -383,11 +383,10 @@ begin
     NoteManager.Initialize;
 
     Note1 := CreateSampleNote(10, 'Active SQLite Note');
-    try
-      NoteManager.SaveNote(Note1);
-    finally
-      Note1.Free;
-    end;
+    // AddNote (not SaveNote): SaveNote persists manager-owned notes only
+    // (anti-resurrection guard), so a note must be added to the manager
+    // before it can be saved. AddNote transfers ownership to the manager.
+    NoteManager.AddNote(Note1);
 
     BackupsDir := TPath.Combine(FTempDir, 'backups');
     BackupService := TBackupService.Create(NoteManager, FSettings, BackupsDir);

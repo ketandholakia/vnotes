@@ -36,6 +36,11 @@ type
     // Appearance
     grpTheme: TGroupBox;
     chkDarkTheme: TCheckBox;
+    chkAutoHideToolbar: TCheckBox;
+    lblFontSettings: TLabel;
+    lblCurrentFont: TLabel;
+    btnChooseFont: TButton;
+    dlgFont: TFontDialog;
     // Hotkeys
     grpHotkeys: TGroupBox;
     lblHotkeyNewNote: TLabel;
@@ -58,6 +63,7 @@ type
     procedure btnCancelClick(Sender: TObject);
     procedure btnApplyClick(Sender: TObject);
     procedure chkDarkThemeClick(Sender: TObject);
+    procedure btnChooseFontClick(Sender: TObject);
   private
     FSettings: TSettings;
     FOriginalSettings: TSettings;
@@ -158,6 +164,8 @@ begin
   chkDefaultAlwaysOnTop.Checked := FSettings.DefaultAlwaysOnTop;
   chkEnableHotkeys.Checked := FSettings.EnableHotkeys;
   chkDarkTheme.Checked := FSettings.DarkTheme;
+  chkAutoHideToolbar.Checked := FSettings.AutoHideToolbar;
+  lblCurrentFont.Caption := Format('%s, %d pt', [FSettings.FontName, FSettings.FontSize]);
   edtHotkeyNewNote.Text := FSettings.HotkeyNewNote;
   edtHotkeySearch.Text := FSettings.HotkeySearch;
   chkBackupEnabled.Checked := FSettings.BackupEnabled;
@@ -178,11 +186,26 @@ begin
   FSettings.DefaultAlwaysOnTop := chkDefaultAlwaysOnTop.Checked;
   FSettings.EnableHotkeys := chkEnableHotkeys.Checked;
   FSettings.DarkTheme := chkDarkTheme.Checked;
+  FSettings.AutoHideToolbar := chkAutoHideToolbar.Checked;
   FSettings.HotkeyNewNote := edtHotkeyNewNote.Text;
   FSettings.HotkeySearch := edtHotkeySearch.Text;
   FSettings.BackupEnabled := chkBackupEnabled.Checked;
   FSettings.BackupIntervalDays := StrToIntDef(edtBackupInterval.Text, 1);
   FSettings.BackupRetentionDays := StrToIntDef(edtBackupRetention.Text, 30);
+end;
+
+procedure TSettingsForm.btnChooseFontClick(Sender: TObject);
+begin
+  if FSettings = nil then Exit;
+  
+  dlgFont.Font.Name := FSettings.FontName;
+  dlgFont.Font.Size := FSettings.FontSize;
+  if dlgFont.Execute then
+  begin
+    FSettings.FontName := dlgFont.Font.Name;
+    FSettings.FontSize := dlgFont.Font.Size;
+    lblCurrentFont.Caption := Format('%s, %d pt', [FSettings.FontName, FSettings.FontSize]);
+  end;
 end;
 
 // Phase 4F: the former live theme preview (ApplyPreview -> TrySetStyle)

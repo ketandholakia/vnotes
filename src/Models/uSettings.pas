@@ -21,6 +21,9 @@ type
     FBackupIntervalDays: Integer;
     FBackupRetentionDays: Integer;
     FDarkTheme: Boolean;
+    FAutoHideToolbar: Boolean;
+    FFontName: string;
+    FFontSize: Integer;
     FHotkeyNewNote: string;
     FHotkeySearch: string;
     FLastBackupAt: TDateTime;
@@ -45,6 +48,9 @@ type
     property BackupIntervalDays: Integer read FBackupIntervalDays write FBackupIntervalDays;
     property BackupRetentionDays: Integer read FBackupRetentionDays write FBackupRetentionDays;
     property DarkTheme: Boolean read FDarkTheme write FDarkTheme;
+    property AutoHideToolbar: Boolean read FAutoHideToolbar write FAutoHideToolbar;
+    property FontName: string read FFontName write FFontName;
+    property FontSize: Integer read FFontSize write FFontSize;
     property HotkeyNewNote: string read FHotkeyNewNote write FHotkeyNewNote;
     property HotkeySearch: string read FHotkeySearch write FHotkeySearch;
     property LastBackupAt: TDateTime read FLastBackupAt write FLastBackupAt;
@@ -80,6 +86,9 @@ begin
   FBackupIntervalDays := 1;
   FBackupRetentionDays := 30;
   FDarkTheme := False;
+  FAutoHideToolbar := False;
+  FFontName := 'Segoe UI';
+  FFontSize := 10;
   FHotkeyNewNote := 'Ctrl+Alt+N';
   FHotkeySearch := 'Ctrl+Alt+F';
   FLastBackupAt := 0;
@@ -110,6 +119,9 @@ begin
     FBackupIntervalDays := Ini.ReadInteger('Backup', 'IntervalDays', FBackupIntervalDays);
     FBackupRetentionDays := Ini.ReadInteger('Backup', 'RetentionDays', FBackupRetentionDays);
     FDarkTheme := Ini.ReadBool('Appearance', 'DarkTheme', FDarkTheme);
+    FAutoHideToolbar := Ini.ReadBool('Appearance', 'AutoHideToolbar', FAutoHideToolbar);
+    FFontName := Ini.ReadString('Appearance', 'FontName', FFontName);
+    FFontSize := Ini.ReadInteger('Appearance', 'FontSize', FFontSize);
     FHotkeyNewNote := Ini.ReadString('Hotkeys', 'NewNote', FHotkeyNewNote);
     FHotkeySearch := Ini.ReadString('Hotkeys', 'Search', FHotkeySearch);
 
@@ -160,6 +172,9 @@ begin
     else
       Ini.WriteString('Backup', 'LastBackupAt', '');
     Ini.WriteBool('Appearance', 'DarkTheme', FDarkTheme);
+    Ini.WriteBool('Appearance', 'AutoHideToolbar', FAutoHideToolbar);
+    Ini.WriteString('Appearance', 'FontName', FFontName);
+    Ini.WriteInteger('Appearance', 'FontSize', FFontSize);
     Ini.WriteString('Hotkeys', 'NewNote', FHotkeyNewNote);
     Ini.WriteString('Hotkeys', 'Search', FHotkeySearch);
 
@@ -186,6 +201,9 @@ begin
   FBackupIntervalDays := Source.FBackupIntervalDays;
   FBackupRetentionDays := Source.FBackupRetentionDays;
   FDarkTheme := Source.FDarkTheme;
+  FAutoHideToolbar := Source.FAutoHideToolbar;
+  FFontName := Source.FFontName;
+  FFontSize := Source.FFontSize;
   FHotkeyNewNote := Source.FHotkeyNewNote;
   FHotkeySearch := Source.FHotkeySearch;
   FLastBackupAt := Source.FLastBackupAt;

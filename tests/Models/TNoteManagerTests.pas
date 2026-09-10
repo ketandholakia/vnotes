@@ -51,6 +51,10 @@ type
     procedure TestAddNoteFiresOnNoteCreatedOnce;
     [Test]
     procedure TestAddDuplicateNoteRejected;
+    [Test]
+    procedure TestSaveNoteRefusesNoteNotOwnedByManager;
+    [Test]
+    procedure TestDeleteNoteLeavesNoStorageFile;
   end;
 
 implementation
@@ -219,6 +223,36 @@ begin
   Assert.IsFalse(FManager.AddNote(Note), 'Re-adding the same ID is rejected');
   Assert.AreEqual(1, FCreatedCount, 'No second OnNoteCreated for a duplicate');
   Assert.AreEqual(1, FManager.NoteCount, 'Note count unchanged by the rejection');
+end;
+
+procedure TNoteManagerTestFixture.TestSaveNoteRefusesNoteNotOwnedByManager;
+var
+  Note: TNote;
+begin
+  // Regression guard for note resurrection: SaveNote only persists notes
+  // the manager owns. The delete flow relies on this - a closing note
+  // window saves its (already deleted) note during FormClose, and without
+  // the guard the note would be written straight back into storage.
+  Note := TNote.Create(888, 'Foreign Note', 'C', ncYellow);
+  try
+    FManager.SaveNote(Note);
+    Assert.AreEqual(0, Integer(Length(TDirectory.GetFiles(
+      TPath.Combine(FTempDir, 'notes'), '*.json'))),
+      'SaveNote must not persist a note the manager does not own');
+  finally
+    Note.Free;
+  end;
+end;
+
+procedure TNoteManagerTestFixture.TestDeleteNoteLeavesNoStorageFile;
+var
+  Note: TNote;
+begin
+  Note := FManager.CreateNote('T', 'C', ncYellow);
+  Assert.IsTrue(FManager.DeleteNote(Note.ID), 'DeleteNote should succeed');
+  Assert.AreEqual(0, Integer(Length(TDirectory.GetFiles(
+    TPath.Combine(FTempDir, 'notes'), '*.json'))),
+    'Deleted note must not remain in storage');
 end;
 
 initialization

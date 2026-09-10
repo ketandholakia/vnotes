@@ -33,6 +33,9 @@ type
 
     // -- Settings queries --------------------------------------------
     function GetConfirmDelete: Boolean;
+    function GetAutoHideToolbar: Boolean;
+    function GetFontName: string;
+    function GetFontSize: Integer;
   end;
 
   /// <summary>
@@ -62,6 +65,9 @@ type
     function GetNoteColor(ANoteColor: TNoteColor): TColor;
     function GetNoteTextColor(ANoteColor: TNoteColor): TColor;
     function GetConfirmDelete: Boolean;
+    function GetAutoHideToolbar: Boolean;
+    function GetFontName: string;
+    function GetFontSize: Integer;
   end;
 
 implementation
@@ -125,6 +131,21 @@ end;
 function TNoteEditorContext.GetConfirmDelete: Boolean;
 begin
   Result := FSettings.ConfirmDelete;
+end;
+
+function TNoteEditorContext.GetAutoHideToolbar: Boolean;
+begin
+  Result := FSettings.AutoHideToolbar;
+end;
+
+function TNoteEditorContext.GetFontName: string;
+begin
+  Result := FSettings.FontName;
+end;
+
+function TNoteEditorContext.GetFontSize: Integer;
+begin
+  Result := FSettings.FontSize;
 end;
 
 end.

@@ -39,6 +39,9 @@ type
     procedure OnTimer(Sender: TObject);
     procedure ApplyInterval;
     function ComputeIntervalMs: Int64;
+    // True when a backup is due right now: never backed up, or the time
+    // since the last successful backup has reached the configured interval.
+    function IsOverdue: Boolean;
   public
     constructor Create(ABackupService: TBackupService; ASettings: TSettings);
     destructor Destroy; override;
@@ -101,7 +104,9 @@ end;
 
 procedure TBackupScheduler.ApplyInterval;
 const
-  MAX_TIMER_INTERVAL = High(Integer);
+  // TTimer.Interval is Cardinal (max ~49.7 days); the old High(Integer)
+  // clamp silently shortened configured intervals of 25-30 days.
+  MAX_TIMER_INTERVAL = High(Cardinal);
 var
   Computed: Int64;
 begin
@@ -142,6 +147,22 @@ begin
   FTimer.Enabled := True;
 end;
 
+function TBackupScheduler.IsOverdue: Boolean;
+var
+  Days: Integer;
+begin
+  if FSettings = nil then
+    Exit(False);
+  Days := FSettings.BackupIntervalDays;
+  if Days <= 0 then
+    Days := 1;
+  // TDateTime subtraction yields fractional days.
+  if FLastBackupAt <= 0 then
+    Result := True // never backed up - run the first backup right away
+  else
+    Result := (Now - FLastBackupAt) >= Days;
+end;
+
 procedure TBackupScheduler.Start;
 begin
   if FIsRunning then Exit;
@@ -153,9 +174,18 @@ begin
     Exit;
   end;
   FIntervalDays := FSettings.BackupIntervalDays;
-  ApplyInterval;
-  FTimer.Enabled := True;
   FIsRunning := True;
+  // Catch-up: a TTimer does not accumulate across app restarts or system
+  // sleep, so a plain re-arm could postpone an overdue backup by a full
+  // interval. If the schedule is already due (or has never run), tick
+  // now; OnTimer performs the backup and re-arms the timer.
+  if IsOverdue then
+    OnTimer(nil)
+  else
+  begin
+    ApplyInterval;
+    FTimer.Enabled := True;
+  end;
   FLogger.Info(Format('BackupScheduler: Started (every %d day(s))',
     [FIntervalDays]));
 end;
@@ -179,7 +209,14 @@ begin
   end;
   FIntervalDays := FSettings.BackupIntervalDays;
   if FIsRunning then
-    ApplyInterval
+  begin
+    // A settings change can make the schedule overdue (e.g. a shortened
+    // interval): catch up immediately instead of waiting a full interval.
+    if IsOverdue then
+      OnTimer(nil)
+    else
+      ApplyInterval;
+  end
   else
     Start;
 end;

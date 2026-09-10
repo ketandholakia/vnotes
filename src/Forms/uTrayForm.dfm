@@ -34,6 +34,25 @@ object TrayForm: TTrayForm
       Caption = '&Open Notes List'
       OnClick = miOpenNotesClick
     end
+    object miArrangeNotes: TMenuItem
+      Caption = 'Arran&ge Notes'
+      object miArrangeCascade: TMenuItem
+        Caption = '&Cascade'
+        OnClick = miArrangeCascadeClick
+      end
+      object miArrangeGrid: TMenuItem
+        Caption = '&Grid'
+        OnClick = miArrangeGridClick
+      end
+      object miArrangeByColor: TMenuItem
+        Caption = 'By &Color'
+        OnClick = miArrangeByColorClick
+      end
+      object miArrangeByTag: TMenuItem
+        Caption = 'By &Tag'
+        OnClick = miArrangeByTagClick
+      end
+    end
     object N1: TMenuItem
       Caption = '-'
     end

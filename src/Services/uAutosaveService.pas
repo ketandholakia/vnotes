@@ -60,7 +60,7 @@ begin
       Note := FPendingNotes[NoteID];
       if Assigned(Note) and Assigned(FOnSave) then
       begin
-        FLogger.Debug(Format('Autosave: Saving note ID %', [NoteID]));
+        FLogger.Debug(Format('Autosave: Saving note ID %d', [NoteID]));
         FOnSave(Note);
       end;
     end;
@@ -76,7 +76,7 @@ begin
   NoteID := ANote.ID;
   if NoteID = 0 then Exit;
   FPendingNotes.AddOrSetValue(NoteID, ANote);
-  FLogger.Debug(Format('Autosave: Scheduled save for note ID %', [NoteID]));
+  FLogger.Debug(Format('Autosave: Scheduled save for note ID %d', [NoteID]));
   FTimer.Enabled := False;
   FTimer.Interval := FDelay;
   FTimer.Enabled := True;
@@ -86,7 +86,7 @@ procedure TAutosaveService.CancelSave(const ANoteID: Int64);
 begin
   FTimer.Enabled := False;
   FPendingNotes.Remove(ANoteID);
-  FLogger.Debug(Format('Autosave: Canceled save for note ID %', [ANoteID]));
+  FLogger.Debug(Format('Autosave: Canceled save for note ID %d', [ANoteID]));
 end;
 
 procedure TAutosaveService.Flush;
@@ -101,7 +101,7 @@ begin
       Note := FPendingNotes[NoteID];
       if Assigned(Note) and Assigned(FOnSave) then
       begin
-        FLogger.Debug(Format('Autosave: Flushing save for note ID %', [NoteID]));
+        FLogger.Debug(Format('Autosave: Flushing save for note ID %d', [NoteID]));
         FOnSave(Note);
       end;
     end;
