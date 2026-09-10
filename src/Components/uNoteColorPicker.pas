@@ -103,8 +103,27 @@ begin
 end;
 
 procedure TNoteColorPicker.ShowAt(AScreenX, AScreenY: Integer);
+var
+  M: TMonitor;
+  WA: TRect;
 begin
   FPopup.SelectedColor := FSelectedColor;
+  // Clamp to the work area of the monitor the anchor point sits on, so the
+  // strip cannot open half off-screen next to a right-edge Color button
+  // (review 2026-09-10, minor).
+  M := Screen.MonitorFromPoint(Point(AScreenX, AScreenY), mdNearest);
+  if M <> nil then
+    WA := M.WorkareaRect
+  else
+    WA := Screen.WorkAreaRect;
+  if AScreenX + FPopup.Width > WA.Right then
+    AScreenX := WA.Right - FPopup.Width;
+  if AScreenY + FPopup.Height > WA.Bottom then
+    AScreenY := WA.Bottom - FPopup.Height;
+  if AScreenX < WA.Left then
+    AScreenX := WA.Left;
+  if AScreenY < WA.Top then
+    AScreenY := WA.Top;
   FPopup.Left          := AScreenX;
   FPopup.Top           := AScreenY;
   FPopup.Show;

@@ -18,10 +18,6 @@ type
     FOnNoteDeleted: TNoteEvent;
     function GetNoteCount: Integer;
     function GetNote(Index: Integer): TNote;
-    // Internal write-through to storage without Touch (see implementation).
-    // Used by SaveNote (after Touch) and by CreateNote/AddNote so created,
-    // imported and restored notes keep their original timestamps.
-    procedure PersistNote(const ANote: TNote);
   public
     constructor Create(const AStorage: INoteStorage);
     destructor Destroy; override;
@@ -41,6 +37,11 @@ type
     function FindByID(const ANoteID: Int64): TNote;
     function FindByIndex(const AIndex: Integer): TNote;
     procedure SaveNote(const ANote: TNote);
+    // Write-through to storage without Touch. Used by SaveNote (after
+    // Touch) and by CreateNote/AddNote so created, imported and restored
+    // notes keep their original timestamps; also public for geometry-only
+    // persistence (window arrange) that must not bump UpdatedAt.
+    procedure PersistNote(const ANote: TNote);
     procedure LoadNotes;
     procedure OpenAllNotes;
     procedure CloseAllNotes;

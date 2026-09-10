@@ -210,3 +210,51 @@ probability, cheap to harden.
 4. H3 (Orange/Gray in notes list) — small, user-visible.
 5. H4 + H6 (build hygiene).
 6. H5 + H7 + minor batch.
+
+---
+
+## Fix log — 2026-09-10 (same day)
+
+All findings fixed in commit `536414d` ("fix(6N): address code review 2026-09-10
+findings"). Verified: full dcc32 compile + link clean (W1036 gone); test suite 211/212
+— the single error is `TestProductionBackendIsJsonInNoteApplication`, which cannot run
+while `StickyNotes.exe` holds the live `vnotes.db`. Re-run with the app closed for
+212/212.
+
+- **C1** — `ScrollBars := ssNone` removed (DFM `ssVertical` kept); `TNoteScrollBar.OnTimer`
+  now re-hides the native bar every tick (covers pre-handle `Attach` and the EDIT
+  sticky-scrollbar re-show); `Detach` restores the native bar.
+- **C2** — the header checklist toggle sets `FChecklist.Visible`/`mmContent.Visible`
+  directly (empty checklists are now reachable); `LoadNote` calls `UpdateContentMode`
+  to auto-select checklist mode by item count (pre-6N behavior restored);
+  `CollapseNote` remembers the content mode in `FChecklistWasVisible` and `ExpandNote`
+  restores it.
+- **H1** — `TNoteChecklistPanel.RemoveRow` shifts the array first, then defers the row
+  destruction via `PostMessage(row, CM_RELEASE)` (`TNoteChecklistRow.CMRelease` → Free).
+- **H2** — `TNoteChecklistRow` no longer uses `akRight`; width maintained in a `Resize`
+  override (`CL_MIN_EDIT_W` floor).
+- **H3** — `ncOrange`/`ncGray` added to all three `case` blocks in `uNotesListForm`
+  (light-orange/gray group backgrounds, `Projects (Orange)`/`Archive (Gray)` names,
+  🟧/⬛ emoji) plus `else` fallbacks.
+- **H4** — `build.bat` uses `%VTV_SRC%` (defaults to the current machine path, overridable);
+  dproj search path gains `$(VTV_SRC)`; `build_tests.bat` gains the `Components` path.
+- **H5** — `TNoteManager.PersistNote` is public; all four arrange handlers persist via it
+  (no `Touch`, `UpdatedAt` untouched by arranging).
+- **H6** — `CurrentColor`/`CurrentTag` initialized unconditionally; W1036 gone.
+- **H7** — both swap blocks in `DoRestore` fire `OnAfterStorageSwap` in a nested `finally`
+  even when `Initialize` raises.
+- **Minor** — header hover/pressed colors adapt to background luminance; header glyph
+  font scales with the DPI-scaled button size; wheel handlers return 0; color picker
+  clamps to the anchor monitor's work area.
+
+### Incident: test run clobbered live settings (test isolation is now P1)
+
+Running the suite while `StickyNotes.exe` was open errored mid-test and left the live
+`%APPDATA%\StickyNotes\settings.ini` overwritten with test values
+(`Backend=JSON`, `MigrationCompleted=0`, default font, empty `LastBackupAt`). The
+originals survived in the test's own `settings.ini.testbak` residue and were restored
+manually. The running instance holds the same values in memory, so its exit-time
+`SaveSettings` stays consistent — but this is exactly the `TNoteApplicationTests`
+against-live-APPDATA problem upgraded from hygiene to data-loss risk. Recommended next
+step: inject a temp base path into `TNoteApplication`/`TNoteApplicationTests` before the
+next test run.

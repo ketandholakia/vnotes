@@ -513,9 +513,15 @@ begin
       finally
         if FNoteManager <> nil then
         begin
-          FNoteManager.Initialize;
-          if Assigned(FOnAfterStorageSwap) then
-            FOnAfterStorageSwap(Self);
+          try
+            FNoteManager.Initialize;
+          finally
+            // Fire even if Initialize raised, so the closed note windows
+            // are re-opened against whatever storage state we ended with
+            // (review 2026-09-10 H7).
+            if Assigned(FOnAfterStorageSwap) then
+              FOnAfterStorageSwap(Self);
+          end;
         end;
       end;
     end;
@@ -778,9 +784,15 @@ begin
           finally
             if FNoteManager <> nil then
             begin
-              FNoteManager.Initialize;
-              if Assigned(FOnAfterStorageSwap) then
-                FOnAfterStorageSwap(Self);
+              try
+                FNoteManager.Initialize;
+              finally
+                // Fire even if Initialize raised, so the closed note windows
+                // are re-opened against whatever storage state we ended with
+                // (review 2026-09-10 H7).
+                if Assigned(FOnAfterStorageSwap) then
+                  FOnAfterStorageSwap(Self);
+              end;
             end;
           end;
         end;

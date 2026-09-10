@@ -39,7 +39,12 @@ REM -U unit search path (covers .pas files referenced via plain
 REM   `uses xxx;` in units that are themselves pulled in by the DPR),
 REM -N .dcu output dir.
 REM (redundant hard-coded D:\ketan\...\src\Utils path dropped for portability)
-dcc32 -B -Q -M -U.;Models;Controllers;Storage;Services;Utils;Forms;Components;Application;"D:\delphi\vcl\Athens_vcl\03_Virtual-TreeView-8.3\Source" -NWin32\Debug StickyNotes.dpr 2>&1
+REM Virtual-TreeView source path (VirtualTrees.pas). Override by setting
+REM VTV_SRC before calling this script; the default matches this machine's
+REM checkout layout (review 2026-09-10 H4: no more un-overridable absolute
+REM path baked into the command line).
+if not defined VTV_SRC set "VTV_SRC=D:\delphi\vcl\Athens_vcl\03_Virtual-TreeView-8.3\Source"
+dcc32 -B -Q -M -U.;Models;Controllers;Storage;Services;Utils;Forms;Components;Application;"%VTV_SRC%" -NWin32\Debug StickyNotes.dpr 2>&1
 
 exit /b %ERRORLEVEL%
 

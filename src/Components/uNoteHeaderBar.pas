@@ -126,9 +126,25 @@ begin
 end;
 
 procedure TNoteHeaderBar.DeriveHotPressed;
+var
+  Lum: Integer;
+  C: DWORD;
 begin
-  FHotColor     := BlendColor(clWhite, FBackColor, 60);
-  FPressedColor := BlendColor(clBlack, FBackColor, 40);
+  // Blend the hover/pressed state toward white on dark backgrounds and
+  // toward black on light ones, otherwise the hot state is invisible on
+  // White/Yellow notes (review 2026-09-10, minor).
+  C   := ColorToRGB(FBackColor);
+  Lum := (GetRValue(C) * 77 + GetGValue(C) * 150 + GetBValue(C) * 29) div 256;
+  if Lum >= 128 then
+  begin
+    FHotColor     := BlendColor(clBlack, FBackColor, 45);
+    FPressedColor := BlendColor(clBlack, FBackColor, 90);
+  end
+  else
+  begin
+    FHotColor     := BlendColor(clWhite, FBackColor, 60);
+    FPressedColor := BlendColor(clBlack, FBackColor, 40);
+  end;
 end;
 
 { ── Construction ─────────────────────────────────────────────────────────── }
@@ -227,7 +243,10 @@ begin
   Canvas.FillRect(ClientRect);
 
   Canvas.Font.Name  := 'Segoe MDL2 Assets';
-  Canvas.Font.Size  := 12;
+  // Scale the glyph font with the (DPI-scaled) button size; a fixed 12 pt
+  // shrinks relative to the buttons at 150%+ (review 2026-09-10, minor).
+  // ButtonSize was seeded from GetCaptionHeight, 32 px at 96 DPI.
+  Canvas.Font.Size  := Max(9, MulDiv(12, FButtonSize, 32));
   Canvas.Font.Style := [];
 
   for B := Low(TNoteHeaderButton) to High(TNoteHeaderButton) do

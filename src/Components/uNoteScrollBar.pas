@@ -129,6 +129,10 @@ end;
 
 procedure TNoteScrollBar.Detach;
 begin
+  // Restore the native scrollbar on the target so a detached target is left
+  // in its standard state.
+  if Assigned(FTarget) and FTarget.HandleAllocated then
+    ShowScrollBar(FTarget.Handle, SB_VERT, True);
   FTarget := nil;
   FTimer.Enabled := False;
   FThumbVisible  := False;
@@ -181,6 +185,12 @@ var
   SI: TScrollInfo;
 begin
   if not Assigned(FTarget) or not FTarget.HandleAllocated then Exit;
+
+  // Keep the native scrollbar hidden. A multiline EDIT re-shows it whenever
+  // the content overflows, and it also appears when the target handle is
+  // created after a pre-handle Attach. ShowScrollBar is a no-op when the
+  // bar is already hidden, so this is cheap (review 2026-09-10 C1).
+  ShowScrollBar(FTarget.Handle, SB_VERT, False);
 
   SI.cbSize := SizeOf(SI);
   SI.fMask  := SIF_POS;
@@ -321,7 +331,9 @@ begin
   if Assigned(FTarget) and FTarget.HandleAllocated then
     SendMessage(FTarget.Handle, WM_MOUSEWHEEL,
                 Message.Keys or (Message.WheelDelta shl 16), 0);
-  Message.Result := 1;
+  // 0 = handled; a non-zero result tells the system the message was NOT
+  // handled and should bubble to the parent.
+  Message.Result := 0;
 end;
 
 end.

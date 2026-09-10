@@ -43,6 +43,7 @@ const
   CL_CHECK_MARGIN = 4;
   CL_ADD_ROW_H    = 26;
   CL_SIDE_MARGIN  = 8;
+  CL_MIN_EDIT_W   = 24;
 
 type
   TChecklistItemEvent   = procedure(Sender: TObject; Index: Integer) of object;
@@ -73,9 +74,11 @@ type
 
   protected
     procedure Paint; override;
+    procedure Resize; override;
     procedure MouseMove(Shift: TShiftState; X, Y: Integer); override;
     procedure MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: Integer); override;
     procedure CMMouseLeave(var Message: TMessage); message CM_MOUSELEAVE;
+    procedure CMRelease(var Message: TMessage); message CM_RELEASE;
 
   public
     constructor CreateRow(AOwner: TNoteChecklistPanel; AIndex: Integer;
@@ -168,7 +171,10 @@ begin
   FEdit.Font.Size    := 9;
   FEdit.Left         := CL_CHECK_SIZE + CL_CHECK_MARGIN * 2;
   FEdit.Top          := (CL_ROW_HEIGHT - FEdit.Height) div 2;
-  FEdit.Anchors      := [akLeft, akRight, akTop];
+  // Width is maintained in Resize; the akRight anchor is deliberately NOT
+  // used: its rule is captured against the row's default creation width,
+  // which made the edit overhang the row permanently (review 2026-09-10 H2).
+  FEdit.Width        := Max(CL_MIN_EDIT_W, ClientWidth - FEdit.Left - CL_SIDE_MARGIN);
   FEdit.Color        := ABackColor;
   FEdit.Font.Color   := ATextColor;
   FEdit.OnChange     := EditChange;
@@ -299,6 +305,22 @@ begin
   Invalidate;
 end;
 
+procedure TNoteChecklistRow.Resize;
+begin
+  inherited;
+  if FEdit <> nil then
+    FEdit.Width := Max(CL_MIN_EDIT_W, ClientWidth - FEdit.Left - CL_SIDE_MARGIN);
+end;
+
+procedure TNoteChecklistRow.CMRelease(var Message: TMessage);
+begin
+  // Deferred self-destruction: RemoveRow posts CM_RELEASE because it can be
+  // reached from this row's own EditKeyDown (Ctrl+Delete), while the TEdit
+  // is still mid-WM_KEYDOWN. Freeing synchronously there would let VCL
+  // continue message processing on freed memory (review 2026-09-10 H1).
+  Free;
+end;
+
 procedure TNoteChecklistRow.EditChange(Sender: TObject);
 begin
   FText := FEdit.Text;
@@ -423,9 +445,13 @@ end;
 procedure TNoteChecklistPanel.RemoveRow(AIndex: Integer);
 var
   I: Integer;
+  Row: TNoteChecklistRow;
 begin
   if (AIndex < 0) or (AIndex > High(FRows)) then Exit;
-  FRows[AIndex].Free;
+  Row := FRows[AIndex];
+
+  // Shift the surviving rows left and re-index BEFORE the dying row leaves
+  // the array, so no code can reach it through FRows afterwards.
   for I := AIndex to High(FRows) - 1 do
   begin
     FRows[I] := FRows[I + 1];
@@ -435,6 +461,15 @@ begin
   RebuildLayout;
   if Assigned(FOnItemRemoved) then
     FOnItemRemoved(Self, AIndex);
+
+  // Defer destruction (review 2026-09-10 H1): RemoveRow is reached from the
+  // row's own EditKeyDown (Ctrl+Delete), so its TEdit is mid-WM_KEYDOWN and
+  // a synchronous Free would continue VCL message processing on freed
+  // memory. CM_RELEASE destroys the row after the message handler returns.
+  if Row.HandleAllocated then
+    PostMessage(Row.Handle, CM_RELEASE, 0, 0)
+  else
+    Row.Free;
 end;
 
 procedure TNoteChecklistPanel.AddEditKeyDown(Sender: TObject; var Key: Word; Shift: TShiftState);

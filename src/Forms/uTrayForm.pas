@@ -571,7 +571,7 @@ begin
     Form.Note.Top := T;
     Form.Note.Width := W;
     Form.Note.Height := H;
-    FApplication.NoteManager.SaveNote(Form.Note);
+    FApplication.NoteManager.PersistNote(Form.Note); // geometry only: no Touch (H5)
     
     Inc(L, 25);
     Inc(T, 25);
@@ -621,7 +621,7 @@ begin
     Form.Note.Top := Form.Top;
     Form.Note.Width := Form.Width;
     Form.Note.Height := Form.Height;
-    FApplication.NoteManager.SaveNote(Form.Note);
+    FApplication.NoteManager.PersistNote(Form.Note); // geometry only: no Touch (H5)
   end;
 end;
 
@@ -648,8 +648,9 @@ begin
     H := FApplication.Settings.DefaultHeight;
     
     L := 50; T := 50;
-    if SortedForms.Count > 0 then
-      CurrentColor := SortedForms[0].Note.Color;
+    // FNoteForms is non-empty (guarded above), so the first element exists;
+    // unconditional init also silences W1036 (review 2026-09-10 H6).
+    CurrentColor := SortedForms[0].Note.Color;
       
     for Form in SortedForms do
     begin
@@ -671,7 +672,7 @@ begin
       Form.Note.Top := T;
       Form.Note.Width := W;
       Form.Note.Height := H;
-      FApplication.NoteManager.SaveNote(Form.Note);
+      FApplication.NoteManager.PersistNote(Form.Note); // geometry only: no Touch (H5)
       
       Inc(L, 25);
       Inc(T, 25);
@@ -708,13 +709,12 @@ begin
     H := FApplication.Settings.DefaultHeight;
     
     L := 50; T := 50;
-    if SortedForms.Count > 0 then
-    begin
-      if Length(SortedForms[0].Note.Tags) > 0 then
-        CurrentTag := SortedForms[0].Note.Tags[0]
-      else
-        CurrentTag := '';
-    end;
+    // FNoteForms is non-empty (guarded above); unconditional init also
+    // silences W1036 (review 2026-09-10 H6).
+    if Length(SortedForms[0].Note.Tags) > 0 then
+      CurrentTag := SortedForms[0].Note.Tags[0]
+    else
+      CurrentTag := '';
       
     for Form in SortedForms do
     begin
@@ -740,7 +740,7 @@ begin
       Form.Note.Top := T;
       Form.Note.Width := W;
       Form.Note.Height := H;
-      FApplication.NoteManager.SaveNote(Form.Note);
+      FApplication.NoteManager.PersistNote(Form.Note); // geometry only: no Touch (H5)
       
       Inc(L, 25);
       Inc(T, 25);

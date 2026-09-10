@@ -166,7 +166,10 @@ begin
       ncBlue:   TargetCanvas.Brush.Color := $00FFE6E6; // Light blue
       ncPink:   TargetCanvas.Brush.Color := $00FFE6FF; // Light pink
       ncPurple: TargetCanvas.Brush.Color := $00FAE6FF; // Light purple
-      ncWhite:  TargetCanvas.Brush.Color := clWindow;
+      ncOrange: TargetCanvas.Brush.Color := $00CCE6FF; // Light orange
+      ncGray:   TargetCanvas.Brush.Color := $00F0F0F0; // Light gray
+    else
+      TargetCanvas.Brush.Color := clWindow;
     end;
     TargetCanvas.FillRect(CellRect);
   end;
@@ -207,7 +210,10 @@ begin
         ncBlue:   ColorName := 'Personal (Blue)';
         ncPink:   ColorName := 'Urgent (Pink)';
         ncPurple: ColorName := 'Misc (Purple)';
-        ncWhite:  ColorName := 'Drafts (White)';
+        ncOrange: ColorName := 'Projects (Orange)';
+        ncGray:   ColorName := 'Archive (Gray)';
+      else
+        ColorName := 'Notes';
       end;
       CellText := Format('📁 %s - %d Notes', [ColorName, Sender.ChildCount[Node]]);
     end
@@ -245,7 +251,11 @@ begin
           ncBlue:   Emoji := '🟦';
           ncPink:   Emoji := '🟪'; // pink/purple block
           ncPurple: Emoji := '🟪';
+          ncOrange: Emoji := '🟧';
+          ncGray:   Emoji := '⬛';
           ncWhite:  Emoji := '⬜';
+        else
+          Emoji := '';
         end;
         CellText := Emoji;
       end;

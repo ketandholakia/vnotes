@@ -344,7 +344,8 @@ begin
   ClampScroll;
   LayoutAddEdit;
   Invalidate;
-  Message.Result := 1;
+  // 0 = handled (a non-zero result would bubble the message to the parent)
+  Message.Result := 0;
 end;
 
 { Add edit }

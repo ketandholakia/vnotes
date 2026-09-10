@@ -78,6 +78,7 @@ type
     FCollapsedHeight: Integer;
     FIsClosing:    Boolean;
     FIsLoaded:     Boolean;
+    FChecklistWasVisible: Boolean; // content mode before collapse
     FOnClosed:     TNotifyEvent;
 
     // ── Components ────────────────────────────────────────────────────────
@@ -173,6 +174,7 @@ begin
   FCollapsedHeight  := COLLAPSED_HEIGHT;
   FIsClosing        := False;
   FIsLoaded         := False;
+  FChecklistWasVisible := False;
 end;
 
 procedure TNoteForm.FormCreate(Sender: TObject);
@@ -200,7 +202,10 @@ begin
   // Content memo
   mmContent.Align       := alClient;
   mmContent.BorderStyle := bsNone;
-  mmContent.ScrollBars  := ssNone;
+  // Keep ScrollBars = ssVertical (DFM): the custom scrollbar reads
+  // GetScrollInfo, which only works while the WS_VSCROLL style exists
+  // (review 2026-09-10 C1, verified by tools/ScrollProbe.dpr).
+  // TNoteScrollBar hides the native bar itself.
   mmContent.WordWrap    := True;
   mmContent.Font.Name   := FEditorContext.GetFontName;
   mmContent.Font.Size   := FEditorContext.GetFontSize;
@@ -288,6 +293,10 @@ begin
   FTagStrip.Locked := FNote.Locked;
   FChecklist.SetItems(FNote.ChecklistItems);
   FChecklist.Locked := FNote.Locked;
+
+  // Auto-select the content area (checklist mode when the note has items -
+  // pre-6N behavior). The header toggle does not go through this path.
+  UpdateContentMode;
 
   // Attach scrollbar after memo has its handle
   FScrollBar.Attach(mmContent);
@@ -450,8 +459,11 @@ begin
     nhbChecklist:
     begin
       if FNote.Locked then Exit;
+      // Explicit toggle wins over the item-count auto-selection: without
+      // this, an empty checklist could never receive its first item
+      // (review 2026-09-10 C2).
       FChecklist.Visible := not FChecklist.Visible;
-      UpdateContentMode;
+      mmContent.Visible  := not FChecklist.Visible;
     end;
   end;
 end;
@@ -524,6 +536,9 @@ end;
 
 procedure TNoteForm.CollapseNote;
 begin
+  // Remember the content mode so ExpandNote can restore it (collapse hides
+  // both content areas).
+  FChecklistWasVisible := FChecklist.Visible;
   Height          := FCollapsedHeight;
   mmContent.Visible := False;
   FChecklist.Visible := False;
@@ -534,15 +549,21 @@ end;
 procedure TNoteForm.ExpandNote;
 begin
   Height           := FNote.Height;
-  mmContent.Visible := True;
   edTitle.Visible   := True;
   FTagStrip.Visible := True;
-  UpdateContentMode;
+  // Restore the pre-collapse content mode instead of re-selecting by item
+  // count, so an explicit user choice survives collapse/expand.
+  FChecklist.Visible := FChecklistWasVisible;
+  mmContent.Visible  := not FChecklistWasVisible;
 end;
 
+// Auto-select the content area by checklist presence: notes with items open
+// in checklist mode, empty notes show the memo. Only used on load - the
+// header checklist toggle sets both flags directly so an empty checklist
+// stays reachable.
 procedure TNoteForm.UpdateContentMode;
 begin
-  if FChecklist.Visible and (FNote.ChecklistTotalCount > 0) then
+  if FNote.ChecklistTotalCount > 0 then
   begin
     mmContent.Visible  := False;
     FChecklist.Visible := True;
