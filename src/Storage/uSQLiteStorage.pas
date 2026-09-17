@@ -11,7 +11,7 @@ uses
   FireDAC.Phys.SQLiteDef, FireDAC.Stan.ExprFuncs, FireDAC.Phys.SQLiteWrapper.Stat,
   FireDAC.VCLUI.Wait, FireDAC.Comp.UI, FireDAC.Stan.Param, FireDAC.DatS,
   FireDAC.DApt.Intf, FireDAC.DApt, FireDAC.Comp.DataSet,
-  uStorage, uNote, uEnums, uILogger;
+  uStorage, uNote, uEnums, uILogger, uIso8601;
 
 type
   TSQLiteStorage = class(TInterfacedObject, INoteStorage)
@@ -23,8 +23,6 @@ type
     FLogger: ILogger;
     procedure EnsureDirectories;
     procedure InitDatabaseSchema;
-    function DateTimeToISO8601(const ADateTime: TDateTime): string;
-    function ISO8601ToDateTime(const AStr: string): TDateTime;
     procedure LoadTagsForNote(const ANote: TNote);
     procedure LoadChecklistForNote(const ANote: TNote);
     procedure SaveTagsForNote(const ANote: TNote);
@@ -46,11 +44,6 @@ type
 
 implementation
 
-function DateTimeToISO8601(const ADateTime: TDateTime): string;
-begin
-  Result := FormatDateTime('yyyy-mm-dd"T"hh:nn:ss', ADateTime);
-end;
-
 { TSQLiteStorage }
 
 constructor TSQLiteStorage.Create(const ABasePath: string);
@@ -66,25 +59,6 @@ destructor TSQLiteStorage.Destroy;
 begin
   Finalize;
   inherited;
-end;
-
-function TSQLiteStorage.DateTimeToISO8601(const ADateTime: TDateTime): string;
-begin
-  Result := FormatDateTime('yyyy-mm-dd"T"hh:nn:ss', ADateTime);
-end;
-
-function TSQLiteStorage.ISO8601ToDateTime(const AStr: string): TDateTime;
-begin
-  if AStr = '' then
-    Result := Now
-  else
-  begin
-    try
-      Result := ISO8601ToDate(AStr);
-    except
-      Result := Now;
-    end;
-  end;
 end;
 
 procedure TSQLiteStorage.EnsureDirectories;
@@ -270,8 +244,10 @@ begin
         Note.Collapsed := Query.FieldByName('collapsed').AsInteger <> 0;
         Note.Locked := Query.FieldByName('locked').AsInteger <> 0;
         Note.Favorite := Query.FieldByName('favorite').AsInteger <> 0;
-        Note.CreatedAt := ISO8601ToDateTime(Query.FieldByName('created_at').AsString);
-        Note.UpdatedAt := ISO8601ToDateTime(Query.FieldByName('updated_at').AsString);
+        // Tolerant read: legacy rows hold offset-less local wall-clock, current
+        // rows hold an explicit offset (CODE_REVIEW_2026-09-17 C1).
+        Note.CreatedAt := StoredISO8601ToDateTime(Query.FieldByName('created_at').AsString, Now);
+        Note.UpdatedAt := StoredISO8601ToDateTime(Query.FieldByName('updated_at').AsString, Now);
 
         LoadTagsForNote(Note);
         LoadChecklistForNote(Note);
@@ -419,8 +395,8 @@ begin
       Query.ParamByName('collapsed').AsInteger := Ord(ANote.Collapsed);
       Query.ParamByName('locked').AsInteger := Ord(ANote.Locked);
       Query.ParamByName('favorite').AsInteger := Ord(ANote.Favorite);
-      Query.ParamByName('created_at').AsString := DateTimeToISO8601(ANote.CreatedAt);
-      Query.ParamByName('updated_at').AsString := DateTimeToISO8601(ANote.UpdatedAt);
+      Query.ParamByName('created_at').AsString := DateTimeToStoredISO8601(ANote.CreatedAt);
+      Query.ParamByName('updated_at').AsString := DateTimeToStoredISO8601(ANote.UpdatedAt);
 
       Query.ExecSQL;
 

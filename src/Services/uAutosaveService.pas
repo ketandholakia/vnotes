@@ -4,10 +4,10 @@ interface
 
 uses
   System.SysUtils, System.Classes, System.Generics.Collections, Vcl.ExtCtrls,
-  uNote, uILogger;
+  uNote, uILogger, uServiceInterfaces;
 
 type
-  TAutosaveService = class
+  TAutosaveService = class(TInterfacedObject, IAutosaveService)
   private
     FTimer: TTimer;
     FDelay: Integer;
@@ -15,14 +15,18 @@ type
     FPendingNotes: TDictionary<Int64, TNote>;
     FLogger: ILogger;
     procedure OnTimer(Sender: TObject);
+    function GetOnSave: TProc<TNote>;
+    procedure SetOnSave(const Value: TProc<TNote>);
+    function GetDelay: Integer;
+    procedure SetDelay(const Value: Integer);
   public
     constructor Create(ADelay: Integer = 1000);
     destructor Destroy; override;
     procedure ScheduleSave(ANote: TNote);
     procedure CancelSave(const ANoteID: Int64);
     procedure Flush;
-    property OnSave: TProc<TNote> read FOnSave write FOnSave;
-    property Delay: Integer read FDelay write FDelay;
+    property OnSave: TProc<TNote> read GetOnSave write SetOnSave;
+    property Delay: Integer read GetDelay write SetDelay;
   end;
 
 implementation
@@ -108,6 +112,27 @@ begin
   finally
     FPendingNotes.Clear;
   end;
+end;
+
+function TAutosaveService.GetOnSave: TProc<TNote>;
+begin
+  Result := FOnSave;
+end;
+
+procedure TAutosaveService.SetOnSave(const Value: TProc<TNote>);
+begin
+  FOnSave := Value;
+end;
+
+function TAutosaveService.GetDelay: Integer;
+begin
+  Result := FDelay;
+end;
+
+procedure TAutosaveService.SetDelay(const Value: Integer);
+begin
+  FDelay := Value;
+  FTimer.Interval := FDelay;
 end;
 
 end.

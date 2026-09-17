@@ -320,8 +320,9 @@ begin
     Notes := Storage.LoadAllNotes;
     try
       Assert.AreEqual(1, Notes.Count);
-      Assert.AreEqual(Double(KnownCreated), Double(Notes[0].CreatedAt), 0.001);
-      Assert.AreEqual(Double(KnownUpdated), Double(Notes[0].UpdatedAt), 0.001);
+      // Tighten precision from 0.001 to 1E-7 for strict millisecond matching
+      Assert.AreEqual(Double(KnownCreated), Double(Notes[0].CreatedAt), 1E-7);
+      Assert.AreEqual(Double(KnownUpdated), Double(Notes[0].UpdatedAt), 1E-7);
     finally
       Notes.Free;
     end;

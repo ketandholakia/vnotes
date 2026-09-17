@@ -6,7 +6,7 @@ uses
   System.SysUtils, System.Classes, System.IOUtils, System.DateUtils,
   DUnitX.TestFramework,
   uBackupScheduler, uBackupService, uSettings, uNoteManager, uStorage,
-  uJsonStorage, uNote, uEnums;
+  uJsonStorage, uNote, uEnums, uServiceInterfaces;
 
 type
   [TestFixture]
@@ -18,8 +18,8 @@ type
     FStorage: INoteStorage;
     FNoteManager: TNoteManager;
     FSettings: TSettings;
-    FBackupService: TBackupService;
-    FScheduler: TBackupScheduler;
+    FBackupService: IBackupService;
+    FScheduler: IBackupScheduler;
     FBackupCount: Integer;
     procedure OnBackupComplete(ASuccess: Boolean; const AMessage: string);
   public
@@ -81,7 +81,7 @@ begin
   FSettings.BackupEnabled := True;
   FSettings.BackupIntervalDays := 1;
 
-  FBackupService := TBackupService.Create(FNoteManager, FSettings, FBackupPath);
+  FBackupService := TBackupService.Create(FNoteManager, FSettings, FBackupPath, FBasePath);
   FBackupService.OnComplete := OnBackupComplete;
 
   FBackupCount := 0;
@@ -90,8 +90,8 @@ end;
 
 procedure TBackupSchedulerTestFixture.TearDown;
 begin
-  FreeAndNil(FScheduler);
-  FreeAndNil(FBackupService);
+  FScheduler := nil;
+  FBackupService := nil;
   FreeAndNil(FSettings);
   FreeAndNil(FNoteManager);
   FStorage := nil;
@@ -246,26 +246,92 @@ begin
 end;
 
 type
-  TFailedBackupServiceStub = class(TBackupService)
+  TFailedBackupServiceStub = class(TInterfacedObject, IBackupService)
   public
-    function Backup: Boolean; override;
+    constructor Create;
+    function Backup: Boolean;
+    procedure Restore(const ABackupFile: string);
+    procedure CleanupOldBackups;
+    function GetBackupFileName: string;
+    function GetOnProgress: TBackupProgress;
+    procedure SetOnProgress(const Value: TBackupProgress);
+    function GetOnComplete: TBackupComplete;
+    procedure SetOnComplete(const Value: TBackupComplete);
+    function GetOnBeforeStorageSwap: TStorageSwapEvent;
+    procedure SetOnBeforeStorageSwap(const Value: TStorageSwapEvent);
+    function GetOnAfterStorageSwap: TStorageSwapEvent;
+    procedure SetOnAfterStorageSwap(const Value: TStorageSwapEvent);
   end;
+
+constructor TFailedBackupServiceStub.Create;
+begin
+  inherited Create;
+end;
 
 function TFailedBackupServiceStub.Backup: Boolean;
 begin
   Result := False;
 end;
 
+procedure TFailedBackupServiceStub.Restore(const ABackupFile: string);
+begin
+end;
+
+procedure TFailedBackupServiceStub.CleanupOldBackups;
+begin
+end;
+
+function TFailedBackupServiceStub.GetBackupFileName: string;
+begin
+  Result := '';
+end;
+
+function TFailedBackupServiceStub.GetOnProgress: TBackupProgress;
+begin
+  Result := nil;
+end;
+
+procedure TFailedBackupServiceStub.SetOnProgress(const Value: TBackupProgress);
+begin
+end;
+
+function TFailedBackupServiceStub.GetOnComplete: TBackupComplete;
+begin
+  Result := nil;
+end;
+
+procedure TFailedBackupServiceStub.SetOnComplete(const Value: TBackupComplete);
+begin
+end;
+
+function TFailedBackupServiceStub.GetOnBeforeStorageSwap: TStorageSwapEvent;
+begin
+  Result := nil;
+end;
+
+procedure TFailedBackupServiceStub.SetOnBeforeStorageSwap(const Value: TStorageSwapEvent);
+begin
+end;
+
+function TFailedBackupServiceStub.GetOnAfterStorageSwap: TStorageSwapEvent;
+begin
+  Result := nil;
+end;
+
+procedure TFailedBackupServiceStub.SetOnAfterStorageSwap(const Value: TStorageSwapEvent);
+begin
+end;
+
 procedure TBackupSchedulerTestFixture.TestFailedBackupDoesNotUpdateTimestamp;
 var
   PrevTime: TDateTime;
-  BadScheduler: TBackupScheduler;
-  FailedService: TBackupService;
+  BadScheduler: IBackupScheduler;
+  FailedService: IBackupService;
 begin
   PrevTime := EncodeDateTime(2026, 1, 1, 12, 0, 0, 0);
   FSettings.LastBackupAt := PrevTime;
 
-  FailedService := TFailedBackupServiceStub.Create(FNoteManager, FSettings, FBackupPath);
+  FailedService := TFailedBackupServiceStub.Create;
   try
     BadScheduler := TBackupScheduler.Create(FailedService, FSettings);
     try
@@ -275,10 +341,10 @@ begin
       Assert.AreEqual(Double(PrevTime), Double(FSettings.LastBackupAt), 0.0001,
         'Settings LastBackupAt must remain unchanged on failed backup');
     finally
-      BadScheduler.Free;
+      BadScheduler := nil;
     end;
   finally
-    FailedService.Free;
+    FailedService := nil;
   end;
 end;
 

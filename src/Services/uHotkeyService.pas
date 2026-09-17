@@ -4,13 +4,10 @@ interface
 
 uses
   System.SysUtils, System.Classes, System.Types, Winapi.Windows, Winapi.Messages,
-  Vcl.Forms, uILogger;
+  Vcl.Forms, uILogger, uServiceInterfaces;
 
 type
-  THotkeyID = (hkNewNote, hkSearch);
-  THotkeyEvent = procedure of object;
-
-  THotkeyService = class
+  THotkeyService = class(TInterfacedObject, IHotkeyService)
   private
     FHandle: HWND;
     FRegistered: array[THotkeyID] of Boolean;
@@ -21,7 +18,7 @@ type
       Key: UINT;
       Enabled: Boolean;
       Event: THotkeyEvent;
-      HotkeyStr: string; // kept so EnableHotkey(True) can re-register later
+      HotkeyStr: string;
     end;
     FOnHotkey: array[THotkeyID] of THotkeyEvent;
     procedure WndProc(var Message: TMessage);
@@ -34,7 +31,7 @@ type
     function UnregisterHotkey(AID: THotkeyID): Boolean;
     procedure SetHotkey(AID: THotkeyID; const AHotkeyStr: string; AEvent: THotkeyEvent);
     procedure EnableHotkey(AID: THotkeyID; AEnable: Boolean);
-    procedure HandleMessage(var Message: TMessage);  // Public method for message handling
+    procedure HandleMessage(var Message: TMessage);
     property FailedRegistrations: string read GetFailedRegistrations;
     procedure ShowHotkeyFailures;
   end;

@@ -62,7 +62,7 @@ type
 implementation
 
 uses
-  System.DateUtils, uILogger;
+  System.DateUtils, uILogger, uIso8601;
 
 { TSettings }
 
@@ -130,21 +130,15 @@ begin
     FMigrationTimestamp := Ini.ReadString('Storage', 'MigrationTimestamp', FMigrationTimestamp);
 
     LastBackupStr := Ini.ReadString('Backup', 'LastBackupAt', '');
-    if LastBackupStr <> '' then
+    // Tolerant read: accepts the current offset-bearing format and the legacy
+    // offset-less one (CODE_REVIEW_2026-09-17 C1). 0 keeps the previous
+    // "never backed up" behaviour for empty or unparseable values.
+    FLastBackupAt := StoredISO8601ToDateTime(LastBackupStr, 0);
+    if (LastBackupStr <> '') and (FLastBackupAt <= 0) then
     begin
-      try
-        FLastBackupAt := ISO8601ToDate(LastBackupStr, False);
-      except
-        on E: Exception do
-        begin
-          FLastBackupAt := 0;
-          Logger := CreateLogger;
-          Logger.Warning('Settings: Failed to parse LastBackupAt timestamp "' + LastBackupStr + '": ' + E.Message);
-        end;
-      end;
-    end
-    else
-      FLastBackupAt := 0;
+      Logger := CreateLogger;
+      Logger.Warning('Settings: Failed to parse LastBackupAt timestamp "' + LastBackupStr + '"');
+    end;
   finally
     Ini.Free;
   end;
@@ -168,7 +162,7 @@ begin
     Ini.WriteInteger('Backup', 'IntervalDays', FBackupIntervalDays);
     Ini.WriteInteger('Backup', 'RetentionDays', FBackupRetentionDays);
     if FLastBackupAt > 0 then
-      Ini.WriteString('Backup', 'LastBackupAt', DateToISO8601(FLastBackupAt, False))
+      Ini.WriteString('Backup', 'LastBackupAt', DateTimeToStoredISO8601(FLastBackupAt))
     else
       Ini.WriteString('Backup', 'LastBackupAt', '');
     Ini.WriteBool('Appearance', 'DarkTheme', FDarkTheme);

@@ -125,7 +125,7 @@ begin
   FSettings.BackupIntervalDays := 1;
   FSettings.BackupRetentionDays := 7;
 
-  FBackupService := TBackupService.Create(FNoteManager, FSettings, FBackupPath);
+  FBackupService := TBackupService.Create(FNoteManager, FSettings, FBackupPath, FBasePath);
   FBackupService.OnComplete := OnBackupComplete;
   FBackupService.OnProgress := OnProgress;
 

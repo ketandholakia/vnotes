@@ -389,7 +389,7 @@ begin
     NoteManager.AddNote(Note1);
 
     BackupsDir := TPath.Combine(FTempDir, 'backups');
-    BackupService := TBackupService.Create(NoteManager, FSettings, BackupsDir);
+    BackupService := TBackupService.Create(NoteManager, FSettings, BackupsDir, FTempDir);
     try
       Assert.IsTrue(BackupService.Backup);
       BackupPath := BackupService.GetBackupFileName;
@@ -461,7 +461,7 @@ begin
   NoteManager := TNoteManager.Create(Storage);
   try
     NoteManager.Initialize;
-    BackupService := TBackupService.Create(NoteManager, FSettings, BackupsDir);
+    BackupService := TBackupService.Create(NoteManager, FSettings, BackupsDir, FTempDir);
     try
       // Restore legacy JSON backup
       BackupService.Restore(ZipPath);

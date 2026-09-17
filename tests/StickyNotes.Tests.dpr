@@ -22,7 +22,9 @@ uses
   TStorageMigrationServiceTests in 'Models\TStorageMigrationServiceTests.pas',
   TPhase6LReadinessTests in 'Models\TPhase6LReadinessTests.pas',
   uStorageMigrationOrchestrator in '..\src\Services\uStorageMigrationOrchestrator.pas',
-  TPhase6MActivationTests in 'Models\TPhase6MActivationTests.pas';
+  TPhase6MActivationTests in 'Models\TPhase6MActivationTests.pas',
+  uIso8601 in '..\src\Utils\uIso8601.pas',
+  TNoteTimestampTests in 'Models\TNoteTimestampTests.pas';
 
 var
   runner: ITestRunner;

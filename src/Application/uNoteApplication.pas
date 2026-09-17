@@ -8,7 +8,7 @@ uses
   System.IOUtils,
   uNote, uNoteManager, uSettings, uSettingsController,
   uAutosaveService, uHotkeyService, uThemeService, uBackupService,
-  uBackupScheduler,
+  uBackupScheduler, uServiceInterfaces,
   uStorage, uJsonStorage, uStorageResolver, uStorageMigrationOrchestrator;
 
 type
@@ -16,81 +16,145 @@ type
   private
     FSettingsController: TSettingsController;
     FNoteManager: TNoteManager;
-    FAutosaveService: TAutosaveService;
-    FHotkeyService: THotkeyService;
-    FThemeService: TThemeService;
-    FBackupService: TBackupService;
-    FBackupScheduler: TBackupScheduler;
+    FAutosaveService: IAutosaveService;
+    FHotkeyService: IHotkeyService;
+    FThemeService: IThemeService;
+    FBackupService: IBackupService;
+    FBackupScheduler: IBackupScheduler;
     FStorage: INoteStorage;
     FAppDataPath: string;
 
     FOnNoteCreated: TNoteEvent;
     FOnNoteChanged: TNoteEvent;
     FOnNoteDeleted: TNoteEvent;
+    FOnNoteOpenRequested: TNoteEvent;
+    FOnNoteCloseRequested: TNoteEvent;
 
     function GetAppDataPath: string;
     function GetSettings: TSettings;
     procedure LoadSettings;
   public
     procedure SaveSettings;
-    constructor Create(const AHandle: HWND);
+    // ABasePath is an isolation seam: supply an explicit directory to keep the
+    // instance away from the user's live %APPDATA%\StickyNotes (tests use it),
+    // otherwise the production path is resolved as before.
+    constructor Create(const AHandle: HWND;
+      const ABasePath: string = '';
+      const AAutosaveService: IAutosaveService = nil;
+      const AHotkeyService: IHotkeyService = nil;
+      const AThemeService: IThemeService = nil;
+      const ABackupService: IBackupService = nil;
+      const ABackupScheduler: IBackupScheduler = nil);
     destructor Destroy; override;
     procedure Initialize;
     procedure Shutdown;
     // Refresh the periodic backup schedule from current settings.
     // Called by the tray form after the user OKs new settings.
     procedure RefreshBackupSchedule;
+    // Request to open/close all note windows - fires OnNoteOpenRequested/OnNoteCloseRequested events
+    procedure RequestOpenAllNotes;
+    procedure RequestCloseAllNotes;
 
     property NoteManager: TNoteManager read FNoteManager;
     property Settings: TSettings read GetSettings;
-    property ThemeService: TThemeService read FThemeService;
-    property AutosaveService: TAutosaveService read FAutosaveService;
-    property HotkeyService: THotkeyService read FHotkeyService;
-    property BackupService: TBackupService read FBackupService;
-    property BackupScheduler: TBackupScheduler read FBackupScheduler;
+    property ThemeService: IThemeService read FThemeService;
+    property AutosaveService: IAutosaveService read FAutosaveService;
+    property HotkeyService: IHotkeyService read FHotkeyService;
+    property BackupService: IBackupService read FBackupService;
+    property BackupScheduler: IBackupScheduler read FBackupScheduler;
     property AppDataPath: string read FAppDataPath;
 
     property OnNoteCreated: TNoteEvent read FOnNoteCreated write FOnNoteCreated;
     property OnNoteChanged: TNoteEvent read FOnNoteChanged write FOnNoteChanged;
     property OnNoteDeleted: TNoteEvent read FOnNoteDeleted write FOnNoteDeleted;
+    property OnNoteOpenRequested: TNoteEvent read FOnNoteOpenRequested write FOnNoteOpenRequested;
+    property OnNoteCloseRequested: TNoteEvent read FOnNoteCloseRequested write FOnNoteCloseRequested;
   end;
 
 implementation
 
 { TNoteApplication }
 
-constructor TNoteApplication.Create(const AHandle: HWND);
+constructor TNoteApplication.Create(const AHandle: HWND;
+  const ABasePath: string = '';
+  const AAutosaveService: IAutosaveService = nil;
+  const AHotkeyService: IHotkeyService = nil;
+  const AThemeService: IThemeService = nil;
+  const ABackupService: IBackupService = nil;
+  const ABackupScheduler: IBackupScheduler = nil);
 var
   SettingsIniPath: string;
+  AutosaveDelay: Integer;
+  BackupPath: string;
+  ActualBackupService: IBackupService;
+  ActualBackupScheduler: IBackupScheduler;
+  ActualAutosaveService: IAutosaveService;
+  ActualThemeService: IThemeService;
+  ActualHotkeyService: IHotkeyService;
 begin
   inherited Create;
-  FAppDataPath := GetAppDataPath;
+
+  if ABasePath <> '' then
+  begin
+    // Explicit isolation seam (CODE_REVIEW_2026-09-17 C3): when the caller
+    // supplies a base path, never resolve the live user profile.
+    FAppDataPath := ABasePath;
+    if not TDirectory.Exists(FAppDataPath) then
+      TDirectory.CreateDirectory(FAppDataPath);
+  end
+  else
+    FAppDataPath := GetAppDataPath;
 
   SettingsIniPath := TPath.Combine(FAppDataPath, 'settings.ini');
   FSettingsController := TSettingsController.Create(SettingsIniPath);
   FSettingsController.LoadSettings;
 
-  FThemeService := TThemeService.Create;
-  FAutosaveService := TAutosaveService.Create(
-    FSettingsController.GetSettings.AutosaveDelay);
-  FHotkeyService := THotkeyService.Create(AHandle);
+  AutosaveDelay := FSettingsController.GetSettings.AutosaveDelay;
+
+  // Create default service implementations if not injected
+  if AAutosaveService = nil then
+    ActualAutosaveService := TAutosaveService.Create(AutosaveDelay)
+  else
+    ActualAutosaveService := AAutosaveService;
+
+  if AHotkeyService = nil then
+    ActualHotkeyService := THotkeyService.Create(AHandle)
+  else
+    ActualHotkeyService := AHotkeyService;
+
+  if AThemeService = nil then
+    ActualThemeService := TThemeService.Create
+  else
+    ActualThemeService := AThemeService;
 
   TStorageMigrationOrchestrator.OrchestrateStorage(FAppDataPath, FSettingsController.GetSettings, SettingsIniPath);
   FStorage := TStorageResolver.ResolveStorage(FAppDataPath, FSettingsController.GetSettings);
 
   FNoteManager := TNoteManager.Create(FStorage);
 
-  FBackupService := TBackupService.Create(
-    FNoteManager,
-    FSettingsController.GetSettings,
-    TPath.Combine(FAppDataPath, 'backups'));
+  BackupPath := TPath.Combine(FAppDataPath, 'backups');
 
-  // Phase 4C: scheduled backups. Owns its timer; started in Initialize
-  // after settings are loaded so the current BackupEnabled/IntervalDays
-  // values are honoured. Stopped in Shutdown.
-  FBackupScheduler := TBackupScheduler.Create(
-    FBackupService,
-    FSettingsController.GetSettings);
+  if ABackupService = nil then
+    ActualBackupService := TBackupService.Create(
+      FNoteManager,
+      FSettingsController.GetSettings,
+      BackupPath,
+      FAppDataPath)
+  else
+    ActualBackupService := ABackupService;
+
+  if ABackupScheduler = nil then
+    ActualBackupScheduler := TBackupScheduler.Create(
+      ActualBackupService,
+      FSettingsController.GetSettings)
+  else
+    ActualBackupScheduler := ABackupScheduler;
+
+  FAutosaveService := ActualAutosaveService;
+  FHotkeyService := ActualHotkeyService;
+  FThemeService := ActualThemeService;
+  FBackupService := ActualBackupService;
+  FBackupScheduler := ActualBackupScheduler;
 
   FAutosaveService.OnSave := procedure(ANote: TNote)
     begin
@@ -101,12 +165,12 @@ end;
 destructor TNoteApplication.Destroy;
 begin
   Shutdown;
-  FBackupScheduler.Free;
-  FBackupService.Free;
+  FBackupScheduler := nil;
+  FBackupService := nil;
   FNoteManager.Free;
-  FHotkeyService.Free;
-  FAutosaveService.Free;
-  FThemeService.Free;
+  FHotkeyService := nil;
+  FAutosaveService := nil;
+  FThemeService := nil;
   FSettingsController.Free;
   inherited;
 end;
@@ -119,6 +183,8 @@ begin
   FNoteManager.OnNoteCreated := FOnNoteCreated;
   FNoteManager.OnNoteChanged := FOnNoteChanged;
   FNoteManager.OnNoteDeleted := FOnNoteDeleted;
+  FNoteManager.OnNoteOpenRequested := FOnNoteOpenRequested;
+  FNoteManager.OnNoteCloseRequested := FOnNoteCloseRequested;
 
   FNoteManager.Initialize;
 
@@ -145,6 +211,18 @@ procedure TNoteApplication.RefreshBackupSchedule;
 begin
   if FBackupScheduler <> nil then
     FBackupScheduler.Refresh;
+end;
+
+procedure TNoteApplication.RequestOpenAllNotes;
+begin
+  if FNoteManager <> nil then
+    FNoteManager.RequestOpenAllNotes;
+end;
+
+procedure TNoteApplication.RequestCloseAllNotes;
+begin
+  if FNoteManager <> nil then
+    FNoteManager.RequestCloseAllNotes;
 end;
 
 function TNoteApplication.GetAppDataPath: string;

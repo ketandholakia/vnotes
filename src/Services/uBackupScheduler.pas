@@ -23,12 +23,12 @@ interface
 
 uses
   System.SysUtils, System.Classes, Vcl.ExtCtrls,
-  uBackupService, uSettings, uILogger;
+  uBackupService, uSettings, uILogger, uServiceInterfaces;
 
 type
-  TBackupScheduler = class
+  TBackupScheduler = class(TInterfacedObject, IBackupScheduler)
   private
-    FBackupService: TBackupService;
+    FBackupService: IBackupService;
     FSettings: TSettings;
     FTimer: TTimer;
     FIntervalDays: Integer;
@@ -39,25 +39,22 @@ type
     procedure OnTimer(Sender: TObject);
     procedure ApplyInterval;
     function ComputeIntervalMs: Int64;
-    // True when a backup is due right now: never backed up, or the time
-    // since the last successful backup has reached the configured interval.
     function IsOverdue: Boolean;
+    function GetIsRunning: Boolean;
+    function GetIsBusy: Boolean;
+    function GetLastBackupAt: TDateTime;
+    function GetIntervalDays: Integer;
   public
-    constructor Create(ABackupService: TBackupService; ASettings: TSettings);
+    constructor Create(const ABackupService: IBackupService; ASettings: TSettings);
     destructor Destroy; override;
     procedure Start;
     procedure Stop;
-    // Re-reads settings (BackupEnabled, BackupIntervalDays) and applies
-    // them to the current schedule. Call after the user accepts new
-    // settings in TSettingsForm.
     procedure Refresh;
-    // Forces an immediate backup tick. If a previous tick is still busy
-    // the call is a no-op so we cannot stack multiple backups.
     procedure TickNow;
-    property IsRunning: Boolean read FIsRunning;
-    property IsBusy: Boolean read FIsBusy;
-    property LastBackupAt: TDateTime read FLastBackupAt;
-    property IntervalDays: Integer read FIntervalDays;
+    property IsRunning: Boolean read GetIsRunning;
+    property IsBusy: Boolean read GetIsBusy;
+    property LastBackupAt: TDateTime read GetLastBackupAt;
+    property IntervalDays: Integer read GetIntervalDays;
   end;
 
 implementation
@@ -67,7 +64,7 @@ const
 
 { TBackupScheduler }
 
-constructor TBackupScheduler.Create(ABackupService: TBackupService; ASettings: TSettings);
+constructor TBackupScheduler.Create(const ABackupService: IBackupService; ASettings: TSettings);
 begin
   inherited Create;
   FBackupService := ABackupService;
@@ -228,6 +225,26 @@ begin
   if FIsBusy then Exit;
   if (FSettings = nil) or (not FSettings.BackupEnabled) then Exit;
   OnTimer(nil);
+end;
+
+function TBackupScheduler.GetIsRunning: Boolean;
+begin
+  Result := FIsRunning;
+end;
+
+function TBackupScheduler.GetIsBusy: Boolean;
+begin
+  Result := FIsBusy;
+end;
+
+function TBackupScheduler.GetLastBackupAt: TDateTime;
+begin
+  Result := FLastBackupAt;
+end;
+
+function TBackupScheduler.GetIntervalDays: Integer;
+begin
+  Result := FIntervalDays;
 end;
 
 end.

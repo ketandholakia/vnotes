@@ -44,8 +44,9 @@ begin
   if ASourceNote.Locked <> ATargetNote.Locked then Exit(False);
   if ASourceNote.Favorite <> ATargetNote.Favorite then Exit(False);
 
-  if Abs(Double(ASourceNote.CreatedAt) - Double(ATargetNote.CreatedAt)) > 0.001 then Exit(False);
-  if Abs(Double(ASourceNote.UpdatedAt) - Double(ATargetNote.UpdatedAt)) > 0.001 then Exit(False);
+  // Tighten tolerance from 0.001 to 1E-7 for strict millisecond matching
+  if Abs(Double(ASourceNote.CreatedAt) - Double(ATargetNote.CreatedAt)) > 1E-7 then Exit(False);
+  if Abs(Double(ASourceNote.UpdatedAt) - Double(ATargetNote.UpdatedAt)) > 1E-7 then Exit(False);
 
   if Length(ASourceNote.Tags) <> Length(ATargetNote.Tags) then Exit(False);
   for I := 0 to High(ASourceNote.Tags) do

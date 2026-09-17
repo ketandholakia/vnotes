@@ -59,12 +59,7 @@ type
 implementation
 
 uses
-  Winapi.Windows;
-
-function DateTimeToISO8601(const ADateTime: TDateTime): string;
-begin
-  Result := FormatDateTime('yyyy-mm-dd"T"hh:nn:ss', ADateTime);
-end;
+  Winapi.Windows, uIso8601;
 
 { TJsonStorage }
 
@@ -140,8 +135,8 @@ begin
   Result.AddPair('Collapsed', TJSONBool.Create(ANote.Collapsed));
   Result.AddPair('Locked', TJSONBool.Create(ANote.Locked));
   Result.AddPair('Favorite', TJSONBool.Create(ANote.Favorite));
-  Result.AddPair('CreatedAt', TJSONString.Create(DateTimeToISO8601(ANote.CreatedAt)));
-  Result.AddPair('UpdatedAt', TJSONString.Create(DateTimeToISO8601(ANote.UpdatedAt)));
+  Result.AddPair('CreatedAt', TJSONString.Create(DateTimeToStoredISO8601(ANote.CreatedAt)));
+  Result.AddPair('UpdatedAt', TJSONString.Create(DateTimeToStoredISO8601(ANote.UpdatedAt)));
 
   Result.AddPair('tags', TagsToJson(ANote.Tags));
   Result.AddPair('checklistItems', ChecklistItemsToJson(ANote.ChecklistItems));
@@ -401,7 +396,7 @@ begin
         CreatedStr := Val.Value;
     end;
     if CreatedStr <> '' then
-      Note.CreatedAt := System.DateUtils.ISO8601ToDate(CreatedStr)
+      Note.CreatedAt := StoredISO8601ToDateTime(CreatedStr, Now)
     else
       Note.CreatedAt := Now;
 
@@ -416,7 +411,7 @@ begin
         UpdatedStr := Val.Value;
     end;
     if UpdatedStr <> '' then
-      Note.UpdatedAt := System.DateUtils.ISO8601ToDate(UpdatedStr)
+      Note.UpdatedAt := StoredISO8601ToDateTime(UpdatedStr, Now)
     else
       Note.UpdatedAt := Now;
 

@@ -47,3 +47,13 @@ build_log.txt
 # OS files
 Thumbs.db
 Desktop.ini
+
+# Runtime data / test artifacts (must never be committed)
+# tests/vnotes.db was previously produced by a test run in the tests\ CWD.
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.db.orphan.*
+*.testbak
+settings.ini.testbak

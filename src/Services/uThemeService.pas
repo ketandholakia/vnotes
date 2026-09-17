@@ -4,15 +4,16 @@ interface
 
 uses
   System.SysUtils, System.Classes, Vcl.Graphics, Vcl.Themes, Vcl.Styles,
-  uEnums;
+  uEnums, uServiceInterfaces;
 
 type
-  TThemeService = class
+  TThemeService = class(TInterfacedObject, IThemeService)
   private
     FDarkTheme: Boolean;
     FNoteColors: array[TNoteColor] of TColor;
     FNoteColorsDark: array[TNoteColor] of TColor;
     procedure InitializeColors;
+    function GetDarkTheme: Boolean;
   public
     constructor Create;
     procedure SetDarkTheme(ADark: Boolean);
@@ -24,7 +25,7 @@ type
     function GetButtonColor: TColor;
     function GetButtonTextColor: TColor;
     function GetHighlightColor: TColor;
-    property DarkTheme: Boolean read FDarkTheme;
+    property DarkTheme: Boolean read GetDarkTheme;
   end;
 
 implementation
@@ -140,6 +141,11 @@ begin
     Result := $000078D7
   else
     Result := clHighlight;
+end;
+
+function TThemeService.GetDarkTheme: Boolean;
+begin
+  Result := FDarkTheme;
 end;
 
 end.

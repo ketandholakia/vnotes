@@ -52,7 +52,7 @@ type
     [Test]
     procedure TestRestoreFailurePreservesExistingDatabase;
     [Test]
-    procedure TestProductionBackendIsJsonInNoteApplication;
+    procedure TestProductionBackendWiringResolvesSQLiteFromSettings;
     [Test]
     procedure TestRestoreCleansUpOrphanedSidecarFiles;
   end;
@@ -86,7 +86,7 @@ begin
   FNoteManager := TNoteManager.Create(FStorage);
   FNoteManager.Initialize;
 
-  FBackupService := TBackupService.Create(FNoteManager, FSettings, FBackupPath);
+  FBackupService := TBackupService.Create(FNoteManager, FSettings, FBackupPath, FBasePath);
   FBackupService.OnComplete := OnBackupComplete;
   FBackupService.OnProgress := OnProgress;
 
@@ -271,7 +271,7 @@ begin
   FreeAndNil(FNoteManager);
   FNoteManager := TNoteManager.Create(FStorage);
   FNoteManager.Initialize;
-  FBackupService := TBackupService.Create(FNoteManager, FSettings, FBackupPath);
+  FBackupService := TBackupService.Create(FNoteManager, FSettings, FBackupPath, FBasePath);
 
   Note := TNote.Create;
   Note.ID := 101;
@@ -390,7 +390,7 @@ begin
   FreeAndNil(FNoteManager);
   FNoteManager := TNoteManager.Create(FStorage);
   FNoteManager.Initialize;
-  FBackupService := TBackupService.Create(FNoteManager, FSettings, FBackupPath);
+  FBackupService := TBackupService.Create(FNoteManager, FSettings, FBackupPath, FBasePath);
 
   // Create a legacy JSON-only backup zip
   LegacyZip := TPath.Combine(FBackupPath, 'legacy_json_backup.zip');
@@ -497,55 +497,51 @@ begin
   end;
 end;
 
-procedure TPhase6LReadinessTestFixture.TestProductionBackendIsJsonInNoteApplication;
+procedure TPhase6LReadinessTestFixture.TestProductionBackendWiringResolvesSQLiteFromSettings;
 var
   App: TNoteApplication;
-  AppDataPath, SettingsFile, BakFile, DbFile, DbBakFile, NotesDir, NotesBakDir: string;
-  PathBuf: array[0..MAX_PATH] of Char;
+  SandboxPath, SettingsFile: string;
+  SeedStorage: INoteStorage;
 begin
-  if Winapi.ShlObj.SHGetFolderPath(0, CSIDL_APPDATA, 0, SHGFP_TYPE_CURRENT, @PathBuf[0]) = S_OK then
-    AppDataPath := TPath.Combine(PathBuf, 'StickyNotes')
-  else
-    AppDataPath := TPath.Combine(TPath.GetTempPath, 'StickyNotes');
-
-  SettingsFile := TPath.Combine(AppDataPath, 'settings.ini');
-  BakFile := SettingsFile + '.testbak';
-  DbFile := TPath.Combine(AppDataPath, 'vnotes.db');
-  DbBakFile := DbFile + '.testbak';
-  NotesDir := TPath.Combine(AppDataPath, 'notes');
-  NotesBakDir := NotesDir + '.testbak';
-
-  if TFile.Exists(SettingsFile) then
-    TFile.Move(SettingsFile, BakFile);
-  if TFile.Exists(DbFile) then
-    TFile.Move(DbFile, DbBakFile);
-  if TDirectory.Exists(NotesDir) then
-    TDirectory.Move(NotesDir, NotesBakDir);
+  // Isolation (CODE_REVIEW_2026-09-17 C3): this test used to relocate the
+  // user's LIVE settings.ini / vnotes.db / notes directory to *.testbak and
+  // then drive TNoteApplication against that production directory. A crash
+  // mid-test (2026-09-10) left the originals displaced, and a running app
+  // would have been writing to a database moved out from under it. It now
+  // runs entirely inside a sandbox that mimics a migrated install.
+  SandboxPath := TPath.Combine(TPath.GetTempPath,
+    'StickyNotes_AppWiring_' + IntToStr(TThread.GetTickCount));
+  if TDirectory.Exists(SandboxPath) then
+    TDirectory.Delete(SandboxPath, True);
+  ForceDirectories(SandboxPath);
   try
-    App := TNoteApplication.Create(0);
+    SettingsFile := TPath.Combine(SandboxPath, 'settings.ini');
+    FSettings.StorageBackend := 'SQLite';
+    FSettings.MigrationCompleted := True;
+    FSettings.SaveToFile(SettingsFile);
+
+    // An active SQLite install must have a real database, otherwise the
+    // orchestrator enters its recovery path instead of the migrated state.
+    SeedStorage := TSQLiteStorage.Create(SandboxPath);
+    SeedStorage.Initialize;
+    SeedStorage.Finalize;
+    SeedStorage := nil;
+
+    App := TNoteApplication.Create(0, SandboxPath);
     try
       Assert.IsNotNull(App.NoteManager, 'NoteManager should not be nil');
-      Assert.AreEqual('SQLite', App.Settings.StorageBackend, 'Production StorageBackend is SQLite in Phase 6M');
-      Assert.IsTrue(App.Settings.MigrationCompleted, 'Production MigrationCompleted is True in Phase 6M');
+      Assert.AreEqual(SandboxPath, App.AppDataPath,
+        'TNoteApplication must honour the injected base path');
+      Assert.AreEqual('SQLite', App.Settings.StorageBackend,
+        'a migrated install must resolve to SQLite');
+      Assert.IsTrue(App.Settings.MigrationCompleted,
+        'MigrationCompleted must round-trip through settings.ini');
     finally
       App.Free;
     end;
   finally
-    if TFile.Exists(BakFile) then
-    begin
-      if TFile.Exists(SettingsFile) then TFile.Delete(SettingsFile);
-      TFile.Move(BakFile, SettingsFile);
-    end;
-    if TFile.Exists(DbBakFile) then
-    begin
-      if TFile.Exists(DbFile) then TFile.Delete(DbFile);
-      TFile.Move(DbBakFile, DbFile);
-    end;
-    if TDirectory.Exists(NotesBakDir) then
-    begin
-      if TDirectory.Exists(NotesDir) then TDirectory.Delete(NotesDir, True);
-      TDirectory.Move(NotesBakDir, NotesDir);
-    end;
+    if TDirectory.Exists(SandboxPath) then
+      TDirectory.Delete(SandboxPath, True);
   end;
 end;
 

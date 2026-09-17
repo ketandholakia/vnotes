@@ -16,6 +16,8 @@ type
     FOnNoteCreated: TNoteEvent;
     FOnNoteChanged: TNoteEvent;
     FOnNoteDeleted: TNoteEvent;
+    FOnNoteOpenRequested: TNoteEvent;
+    FOnNoteCloseRequested: TNoteEvent;
     function GetNoteCount: Integer;
     function GetNote(Index: Integer): TNote;
   public
@@ -43,13 +45,17 @@ type
     // persistence (window arrange) that must not bump UpdatedAt.
     procedure PersistNote(const ANote: TNote);
     procedure LoadNotes;
-    procedure OpenAllNotes;
-    procedure CloseAllNotes;
+    // Request to open/close all notes - fires OnNoteOpenRequested/OnNoteCloseRequested
+    // for each note. The UI layer (TTrayForm) handles actual form creation/destruction.
+    procedure RequestOpenAllNotes;
+    procedure RequestCloseAllNotes;
     property NoteCount: Integer read GetNoteCount;
     property Notes[Index: Integer]: TNote read GetNote; default;
     property OnNoteCreated: TNoteEvent read FOnNoteCreated write FOnNoteCreated;
     property OnNoteChanged: TNoteEvent read FOnNoteChanged write FOnNoteChanged;
     property OnNoteDeleted: TNoteEvent read FOnNoteDeleted write FOnNoteDeleted;
+    property OnNoteOpenRequested: TNoteEvent read FOnNoteOpenRequested write FOnNoteOpenRequested;
+    property OnNoteCloseRequested: TNoteEvent read FOnNoteCloseRequested write FOnNoteCloseRequested;
   end;
 
 implementation
@@ -214,22 +220,22 @@ begin
   end;
 end;
 
-procedure TNoteManager.OpenAllNotes;
+procedure TNoteManager.RequestOpenAllNotes;
 var
   Note: TNote;
 begin
-  // This will be implemented when forms are created
-  // For now, just a placeholder for the controller to use
   for Note in FNotes do
-  begin
-    // Open note form for each note
-  end;
+    if Assigned(FOnNoteOpenRequested) then
+      FOnNoteOpenRequested(Note);
 end;
 
-procedure TNoteManager.CloseAllNotes;
+procedure TNoteManager.RequestCloseAllNotes;
+var
+  Note: TNote;
 begin
-  // Close all open note forms
-  // Implemented in controller
+  for Note in FNotes do
+    if Assigned(FOnNoteCloseRequested) then
+      FOnNoteCloseRequested(Note);
 end;
 
 end.

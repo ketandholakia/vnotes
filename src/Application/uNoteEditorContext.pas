@@ -5,15 +5,10 @@ interface
 uses
   System.SysUtils,
   Vcl.Graphics,
-  uNote, uEnums, uNoteManager, uAutosaveService, uThemeService, uSettings, uILogger;
+  uNote, uEnums, uNoteManager, uAutosaveService, uThemeService, uSettings,
+  uServiceInterfaces, uILogger;
 
 type
-  /// <summary>
-  /// Narrow application-facing interface for note-editor UI (TNoteForm).
-  /// Groups only the operations that a note window genuinely needs,
-  /// hiding the full service implementations behind a single injected
-  /// dependency.
-  /// </summary>
   INoteEditorContext = interface
     ['{9A8B7C6D-5E4F-3A2B-1C0D-E9F8A7B6C5D4}']
     // -- Note lifecycle -----------------------------------------------
@@ -38,20 +33,16 @@ type
     function GetFontSize: Integer;
   end;
 
-  /// <summary>
-  /// Concrete implementation that delegates to the services owned by
-  /// TNoteApplication.
-  /// </summary>
   TNoteEditorContext = class(TInterfacedObject, INoteEditorContext)
   private
     FNoteManager: TNoteManager;
-    FAutosaveService: TAutosaveService;
-    FThemeService: TThemeService;
+    FAutosaveService: IAutosaveService;
+    FThemeService: IThemeService;
     FSettings: TSettings;
   public
     constructor Create(ANoteManager: TNoteManager;
-      AAutosaveService: TAutosaveService;
-      AThemeService: TThemeService;
+      AAutosaveService: IAutosaveService;
+      AThemeService: IThemeService;
       ASettings: TSettings);
 
     // INoteEditorContext
@@ -75,8 +66,8 @@ implementation
 { TNoteEditorContext }
 
 constructor TNoteEditorContext.Create(ANoteManager: TNoteManager;
-  AAutosaveService: TAutosaveService;
-  AThemeService: TThemeService;
+  AAutosaveService: IAutosaveService;
+  AThemeService: IThemeService;
   ASettings: TSettings);
 begin
   inherited Create;

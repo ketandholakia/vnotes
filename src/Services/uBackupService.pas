@@ -5,18 +5,10 @@ interface
 uses
   System.SysUtils, System.Classes, System.IOUtils, System.Zip, System.DateUtils,
   System.Generics.Collections,
-  uNoteManager, uSettings, uILogger;
+  uNoteManager, uSettings, uILogger, uServiceInterfaces;
 
 type
-  TBackupProgress = procedure(const AMessage: string; AProgress: Integer) of object;
-  TBackupComplete = procedure(ASuccess: Boolean; const AMessage: string) of object;
-  // Fired immediately before/after the active storage is swapped during
-  // Restore (the note manager is re-initialized, which frees every TNote).
-  // The UI must close note windows before the swap and may re-open them
-  // after, otherwise open windows keep dangling TNote references.
-  TStorageSwapEvent = procedure(Sender: TObject) of object;
-
-  TBackupService = class
+  TBackupService = class(TInterfacedObject, IBackupService)
   private
     FNoteManager: TNoteManager;
     FSettings: TSettings;
@@ -26,24 +18,33 @@ type
     FOnBeforeStorageSwap: TStorageSwapEvent;
     FOnAfterStorageSwap: TStorageSwapEvent;
     FLastBackupFile: string;
+    FAppDataPath: string;
     function CreateBackupZip(const AZipFile: string): Boolean;
     procedure DoRestore(const ABackupFile: string; const ALogger: ILogger);
     procedure CreateManifest(const ATempDir: string; const ALogger: ILogger);
     function ValidateBackupStructure(const ATempDir: string; const ALogger: ILogger): Boolean;
     function CreatePreRestoreBackup(const ALogger: ILogger): string;
     function ValidateRestoredSettings(const ALogger: ILogger): Boolean;
+    function GetOnProgress: TBackupProgress;
+    procedure SetOnProgress(const Value: TBackupProgress);
+    function GetOnComplete: TBackupComplete;
+    procedure SetOnComplete(const Value: TBackupComplete);
+    function GetOnBeforeStorageSwap: TStorageSwapEvent;
+    procedure SetOnBeforeStorageSwap(const Value: TStorageSwapEvent);
+    function GetOnAfterStorageSwap: TStorageSwapEvent;
+    procedure SetOnAfterStorageSwap(const Value: TStorageSwapEvent);
   public
-    constructor Create(ANoteManager: TNoteManager; ASettings: TSettings; const ABackupPath: string);
+    constructor Create(ANoteManager: TNoteManager; ASettings: TSettings; const ABackupPath: string; const AAppDataPath: string = '');
     destructor Destroy; override;
     function Backup: Boolean; virtual;
     procedure Restore(const ABackupFile: string);
     procedure CleanupOldBackups;
     function GetBackupFileName: string;
     class function ValidateSQLiteDatabase(const ADbPath: string; const ALogger: ILogger): Boolean;
-    property OnProgress: TBackupProgress read FOnProgress write FOnProgress;
-    property OnComplete: TBackupComplete read FOnComplete write FOnComplete;
-    property OnBeforeStorageSwap: TStorageSwapEvent read FOnBeforeStorageSwap write FOnBeforeStorageSwap;
-    property OnAfterStorageSwap: TStorageSwapEvent read FOnAfterStorageSwap write FOnAfterStorageSwap;
+    property OnProgress: TBackupProgress read GetOnProgress write SetOnProgress;
+    property OnComplete: TBackupComplete read GetOnComplete write SetOnComplete;
+    property OnBeforeStorageSwap: TStorageSwapEvent read GetOnBeforeStorageSwap write SetOnBeforeStorageSwap;
+    property OnAfterStorageSwap: TStorageSwapEvent read GetOnAfterStorageSwap write SetOnAfterStorageSwap;
   end;
 
 implementation
@@ -51,7 +52,7 @@ implementation
 uses
   System.Types, System.JSON, uNote, uEnums,
   FireDAC.Comp.Client, FireDAC.Phys.SQLite, FireDAC.Phys.SQLiteDef,
-  uSQLiteStorage, uStorageMigrationService;
+  uSQLiteStorage, uStorageMigrationService, uIso8601;
 
 function GetRelativePath(const ABasePath, AFileName: string): string;
 var
@@ -63,11 +64,6 @@ begin
     Result := Copy(FilePath, Length(BasePath) + 1, MaxInt)
   else
     Result := FilePath;
-end;
-
-function DateTimeToISO8601(const ADateTime: TDateTime): string;
-begin
-  Result := FormatDateTime('yyyy-mm-dd"T"hh:nn:ss', ADateTime);
 end;
 
 class function TBackupService.ValidateSQLiteDatabase(const ADbPath: string; const ALogger: ILogger): Boolean;
@@ -120,12 +116,13 @@ end;
 
 { TBackupService }
 
-constructor TBackupService.Create(ANoteManager: TNoteManager; ASettings: TSettings; const ABackupPath: string);
+constructor TBackupService.Create(ANoteManager: TNoteManager; ASettings: TSettings; const ABackupPath: string; const AAppDataPath: string = '');
 begin
   inherited Create;
   FNoteManager := ANoteManager;
   FSettings := ASettings;
   FBackupPath := ABackupPath;
+  FAppDataPath := AAppDataPath;
   if not TDirectory.Exists(FBackupPath) then
     TDirectory.CreateDirectory(FBackupPath);
 end;
@@ -133,6 +130,46 @@ end;
 destructor TBackupService.Destroy;
 begin
   inherited;
+end;
+
+function TBackupService.GetOnProgress: TBackupProgress;
+begin
+  Result := FOnProgress;
+end;
+
+procedure TBackupService.SetOnProgress(const Value: TBackupProgress);
+begin
+  FOnProgress := Value;
+end;
+
+function TBackupService.GetOnComplete: TBackupComplete;
+begin
+  Result := FOnComplete;
+end;
+
+procedure TBackupService.SetOnComplete(const Value: TBackupComplete);
+begin
+  FOnComplete := Value;
+end;
+
+function TBackupService.GetOnBeforeStorageSwap: TStorageSwapEvent;
+begin
+  Result := FOnBeforeStorageSwap;
+end;
+
+procedure TBackupService.SetOnBeforeStorageSwap(const Value: TStorageSwapEvent);
+begin
+  FOnBeforeStorageSwap := Value;
+end;
+
+function TBackupService.GetOnAfterStorageSwap: TStorageSwapEvent;
+begin
+  Result := FOnAfterStorageSwap;
+end;
+
+procedure TBackupService.SetOnAfterStorageSwap(const Value: TStorageSwapEvent);
+begin
+  FOnAfterStorageSwap := Value;
 end;
 
 function TBackupService.GetBackupFileName: string;
@@ -228,8 +265,8 @@ begin
         Json.AddPair('Collapsed', System.JSON.TJSONBool.Create(Note.Collapsed));
         Json.AddPair('Locked', System.JSON.TJSONBool.Create(Note.Locked));
         Json.AddPair('Favorite', System.JSON.TJSONBool.Create(Note.Favorite));
-        Json.AddPair('CreatedAt', DateTimeToISO8601(Note.CreatedAt));
-        Json.AddPair('UpdatedAt', DateTimeToISO8601(Note.UpdatedAt));
+        Json.AddPair('CreatedAt', DateTimeToStoredISO8601(Note.CreatedAt));
+        Json.AddPair('UpdatedAt', DateTimeToStoredISO8601(Note.UpdatedAt));
 
         // Serialize tags
         if Length(Note.Tags) > 0 then
@@ -284,7 +321,7 @@ begin
     FSettings.SaveToFile(SettingsFile);
 
     // Package SQLite database if present in AppData path
-    FileName := TPath.Combine(TPath.GetDirectoryName(ExpandFileName(FBackupPath)), 'vnotes.db');
+    FileName := TPath.Combine(FAppDataPath, 'vnotes.db');
     if TFile.Exists(FileName) then
     begin
       if ValidateSQLiteDatabase(FileName, Logger) then
@@ -441,7 +478,7 @@ begin
     IsSQLiteActive := (FSettings <> nil) and SameText(FSettings.StorageBackend, 'SQLite') and FSettings.MigrationCompleted;
 
     TempDbFile := TPath.Combine(TempDir, 'vnotes.db');
-    AppDataPath := TPath.GetDirectoryName(ExpandFileName(FBackupPath));
+    AppDataPath := FAppDataPath;
     AppDbPath := TPath.Combine(AppDataPath, 'vnotes.db');
 
     if IsSQLiteActive and TFile.Exists(TempDbFile) then
@@ -661,12 +698,14 @@ begin
                 UpdatedStr := Copy(UpdatedStr, 2, Length(UpdatedStr) - 2);
             end;
 
+            // Tolerant read: pre-2026-09-10 backups store offset-less local
+            // wall-clock, never UTC (CODE_REVIEW_2026-09-17 C1/H1).
             if CreatedStr <> '' then
-              Note.CreatedAt := ISO8601ToDate(CreatedStr)
+              Note.CreatedAt := StoredISO8601ToDateTime(CreatedStr, Now)
             else
               Note.CreatedAt := Now;
             if UpdatedStr <> '' then
-              Note.UpdatedAt := ISO8601ToDate(UpdatedStr)
+              Note.UpdatedAt := StoredISO8601ToDateTime(UpdatedStr, Now)
             else
               Note.UpdatedAt := Now;
 
@@ -956,7 +995,7 @@ begin
   ManifestJson := System.JSON.TJSONObject.Create;
   try
     ManifestJson.AddPair('version', System.JSON.TJSONNumber.Create(1));
-    ManifestJson.AddPair('createdAt', DateTimeToISO8601(Now));
+    ManifestJson.AddPair('createdAt', DateTimeToStoredISO8601(Now));
     ManifestJson.AddPair('applicationVersion', '5B');
 
     ManifestText := ManifestJson.Format;

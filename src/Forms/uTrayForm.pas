@@ -10,7 +10,7 @@ uses
   uNote, uNoteManager, uSettings, uSettingsController,
   uAutosaveService, uHotkeyService, uThemeService, uBackupService,
   uStorage, uNoteQuery, uNoteForm, uNoteApplication, uNoteEditorContext,
-  uNotesListForm;
+  uNotesListForm, uServiceInterfaces;
 
 type
   TTrayForm = class(TForm)
@@ -73,6 +73,9 @@ type
     procedure OnNoteCreated(const ANote: TNote);
     procedure OnNoteChanged(const ANote: TNote);
     procedure OnNoteDeleted(const ANote: TNote);
+    // New request handlers for event-driven note open/close
+    procedure OnNoteOpenRequested(const ANote: TNote);
+    procedure OnNoteCloseRequested(const ANote: TNote);
     procedure OnHotkeyNewNote;
     procedure OnHotkeySearch;
     procedure CreateNoteForm(ANote: TNote);
@@ -112,6 +115,9 @@ begin
   FApplication.OnNoteCreated := OnNoteCreated;
   FApplication.OnNoteChanged := OnNoteChanged;
   FApplication.OnNoteDeleted := OnNoteDeleted;
+  // Wire new request events for event-driven note open/close
+  FApplication.OnNoteOpenRequested := OnNoteOpenRequested;
+  FApplication.OnNoteCloseRequested := OnNoteCloseRequested;
 
   // Wire backup service callbacks for user feedback
   FApplication.BackupService.OnProgress := BackupProgress;
@@ -363,14 +369,14 @@ begin
   // The storage swap re-initializes the note manager and frees every TNote;
   // open note windows hold direct references to those objects and must be
   // closed first, otherwise they become use-after-free dangling windows.
-  CloseAllNotes;
+  FApplication.RequestCloseAllNotes;
 end;
 
 procedure TTrayForm.BackupAfterStorageSwap(Sender: TObject);
 begin
   // The manager has been re-initialized against the restored storage;
   // re-open note windows for the restored notes.
-  OpenAllNotes;
+  FApplication.RequestOpenAllNotes;
 end;
 
 procedure TTrayForm.OnAbout(Sender: TObject);
@@ -431,6 +437,24 @@ begin
     FNotesListForm.RefreshList;
 end;
 
+procedure TTrayForm.OnNoteOpenRequested(const ANote: TNote);
+begin
+  if Assigned(ANote) then
+    ShowNoteWindow(ANote);
+end;
+
+procedure TTrayForm.OnNoteCloseRequested(const ANote: TNote);
+var
+  Form: TNoteForm;
+begin
+  if Assigned(ANote) then
+  begin
+    Form := FindNoteForm(ANote);
+    if Assigned(Form) then
+      Form.Close;
+  end;
+end;
+
 procedure TTrayForm.OnHotkeyNewNote;
 begin
   OnNewNote(Self);
@@ -459,32 +483,13 @@ begin
 end;
 
 procedure TTrayForm.OpenAllNotes;
-var
-  I: Integer;
-  Note: TNote;
 begin
-  for I := 0 to FApplication.NoteManager.NoteCount - 1 do
-  begin
-    Note := FApplication.NoteManager.Notes[I];
-    var Found := False;
-    for var Form in FNoteForms do
-      if Form.Note = Note then
-      begin
-        Found := True;
-        Break;
-      end;
-    if not Found then
-      CreateNoteForm(Note);
-  end;
+  FApplication.RequestOpenAllNotes;
 end;
 
 procedure TTrayForm.CloseAllNotes;
-var
-  I: Integer;
 begin
-  for I := FNoteForms.Count - 1 downto 0 do
-    FNoteForms[I].CloseWithoutSaving;
-  FNoteForms.Clear;
+  FApplication.RequestCloseAllNotes;
 end;
 
 procedure TTrayForm.SaveAllNotes;

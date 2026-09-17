@@ -33,6 +33,7 @@ uses
   uJsonUtils in 'Utils\uJsonUtils.pas',
   uColorUtils in 'Utils\uColorUtils.pas',
   uILogger in 'Utils\uILogger.pas',
+  uIso8601 in 'Utils\uIso8601.pas',
   uSingleInstance in 'Utils\uSingleInstance.pas',
   uNoteHeaderBar in 'Components\uNoteHeaderBar.pas',
   uNoteColorPicker in 'Components\uNoteColorPicker.pas',
