@@ -10,7 +10,7 @@ uses
   uAutosaveService, uHotkeyService, uThemeService, uBackupService,
   uBackupScheduler, uServiceInterfaces,
   uStorage, uJsonStorage, uStorageResolver, uStorageMigrationOrchestrator,
-  uFolderSyncBackend, uSyncEngine, uSyncScheduler,
+  uFolderSyncBackend, uSyncEngine, uSyncScheduler, uWebDavBackend, uCredentialStore,
   uILogger;
 
 type
@@ -27,6 +27,7 @@ type
     FAppDataPath: string;
     FSyncService: ISyncService;
     FSyncScheduler: ISyncScheduler;
+    FCredentialStore: ICredentialStore;
 
     FOnNoteCreated: TNoteEvent;
     FOnNoteChanged: TNoteEvent;
@@ -148,7 +149,10 @@ begin
 
   FNoteManager := TNoteManager.Create(FStorage);
 
-  // Phase 7B: build the sync engine when a folder backend is configured.
+  // Phase 7E: sync secrets live in the OS credential store, never in settings.ini.
+  FCredentialStore := CreateWindowsCredentialStore;
+
+  // Phase 7B: build the sync engine when a backend is configured.
   ApplySyncSettings;
 
   BackupPath := TPath.Combine(FAppDataPath, 'backups');
@@ -242,18 +246,35 @@ end;
 
 procedure TNoteApplication.ApplySyncSettings;
 var
-  Folder: string;
+  BackendType, Folder, Url: string;
 begin
   FSyncScheduler := nil; // drop any previously configured scheduler
   FSyncService := nil;   // ... and its engine
   if FSettingsController = nil then Exit;
   if not FSettingsController.GetSettings.SyncEnabled then Exit;
-  Folder := Trim(FSettingsController.GetSettings.SyncFolder);
-  if Folder = '' then Exit;
-  FSyncService := TSyncEngine.Create(
-    FNoteManager,
-    TFolderSyncBackend.Create(Folder),
-    TPath.Combine(FAppDataPath, 'sync-state.json'));
+
+  BackendType := Trim(FSettingsController.GetSettings.SyncBackendType);
+  if SameText(BackendType, 'webdav') then
+  begin
+    Url := Trim(FSettingsController.GetSettings.SyncWebDavUrl);
+    if Url = '' then Exit;
+    FSyncService := TSyncEngine.Create(
+      FNoteManager,
+      TWebDavBackend.Create(Url,
+        FSettingsController.GetSettings.SyncWebDavUser,
+        FCredentialStore.GetSecret(SyncWebDavCredentialTarget)),
+      TPath.Combine(FAppDataPath, 'sync-state.json'));
+  end
+  else
+  begin
+    Folder := Trim(FSettingsController.GetSettings.SyncFolder);
+    if Folder = '' then Exit;
+    FSyncService := TSyncEngine.Create(
+      FNoteManager,
+      TFolderSyncBackend.Create(Folder),
+      TPath.Combine(FAppDataPath, 'sync-state.json'));
+  end;
+
   // The scheduler is armed later by Initialize / RefreshSyncSchedule.
   FSyncScheduler := TSyncScheduler.Create(FSyncService, FSettingsController.GetSettings);
 end;

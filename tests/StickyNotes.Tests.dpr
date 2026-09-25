@@ -29,7 +29,8 @@ uses
   TLoggerTests in 'Models\TLoggerTests.pas',
   TSyncEngineTests in 'Models\TSyncEngineTests.pas',
   TSyncSchedulerTests in 'Models\TSyncSchedulerTests.pas',
-  TSyncBackendTests in 'Models\TSyncBackendTests.pas';
+  TSyncBackendTests in 'Models\TSyncBackendTests.pas',
+  TCredentialStoreTests in 'Models\TCredentialStoreTests.pas';
 
 var
   runner: ITestRunner;

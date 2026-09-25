@@ -6,7 +6,7 @@ uses
   Winapi.Windows, Winapi.Messages, System.SysUtils, System.Classes,
   Vcl.Graphics, Vcl.Controls, Vcl.Forms, Vcl.Dialogs, Vcl.StdCtrls, Vcl.ExtCtrls,
   Vcl.ComCtrls, Vcl.Buttons,
-  uSettings;
+  uSettings, uCredentialStore;
 
 type
   TSettingsForm = class(TForm)
@@ -76,6 +76,16 @@ type
     FBtnBrowseSync: TButton;
     FLblSyncInterval: TLabel;
     FEdtSyncInterval: TEdit;
+    FtsSync: TTabSheet;
+    FLblSyncBackend: TLabel;
+    FCbSyncBackend: TComboBox;
+    FLblWebDavUrl: TLabel;
+    FEdtWebDavUrl: TEdit;
+    FLblWebDavUser: TLabel;
+    FEdtWebDavUser: TEdit;
+    FLblWebDavPassword: TLabel;
+    FEdtWebDavPassword: TEdit;
+    FCredentialStore: ICredentialStore;
     procedure LoadControls;
     procedure SaveControls;
     procedure SyncBrowseClick(Sender: TObject);
@@ -119,16 +129,21 @@ begin
   udBackupRetention.Max := 365;
   udBackupRetention.Increment := 1;
 
-  // Phase 7B: sync controls, created in code and placed under the backup group
-  // on the same tab (keeps the DFM untouched).
-  tsBackup.Caption := 'Backup / Sync';
+  // Phase 7B/7E: sync controls live on their own tab, created in code so the
+  // dialog's DFM stays untouched. The WebDAV password is read from / written to
+  // the OS credential store, never settings.ini.
+  FCredentialStore := CreateWindowsCredentialStore;
+
+  FtsSync := TTabSheet.Create(Self);
+  FtsSync.PageControl := pcSettings;
+  FtsSync.Caption := 'Sync';
 
   FGrpSync := TGroupBox.Create(Self);
-  FGrpSync.Parent := tsBackup;
+  FGrpSync.Parent := FtsSync;
   FGrpSync.Left := 16;
-  FGrpSync.Top := 152;
+  FGrpSync.Top := 16;
   FGrpSync.Width := 441;
-  FGrpSync.Height := 160;
+  FGrpSync.Height := 305;
   FGrpSync.Caption := 'Sync Settings';
 
   FChkSyncEnabled := TCheckBox.Create(Self);
@@ -136,39 +151,91 @@ begin
   FChkSyncEnabled.Left := 12;
   FChkSyncEnabled.Top := 24;
   FChkSyncEnabled.Width := 400;
-  FChkSyncEnabled.Caption := 'Enable folder sync (Drive / Dropbox / OneDrive)';
+  FChkSyncEnabled.Caption := 'Enable sync';
+
+  FLblSyncBackend := TLabel.Create(Self);
+  FLblSyncBackend.Parent := FGrpSync;
+  FLblSyncBackend.Left := 12;
+  FLblSyncBackend.Top := 56;
+  FLblSyncBackend.Caption := 'Backend:';
+
+  FCbSyncBackend := TComboBox.Create(Self);
+  FCbSyncBackend.Parent := FGrpSync;
+  FCbSyncBackend.Left := 170;
+  FCbSyncBackend.Top := 52;
+  FCbSyncBackend.Width := 200;
+  FCbSyncBackend.Style := csDropDownList;
+  FCbSyncBackend.Items.Add('Folder (cloud-synced)');
+  FCbSyncBackend.Items.Add('WebDAV');
 
   FLblSyncFolder := TLabel.Create(Self);
   FLblSyncFolder.Parent := FGrpSync;
   FLblSyncFolder.Left := 12;
-  FLblSyncFolder.Top := 52;
+  FLblSyncFolder.Top := 88;
   FLblSyncFolder.Caption := 'Sync folder:';
 
   FEdtSyncFolder := TEdit.Create(Self);
   FEdtSyncFolder.Parent := FGrpSync;
   FEdtSyncFolder.Left := 12;
-  FEdtSyncFolder.Top := 72;
+  FEdtSyncFolder.Top := 106;
   FEdtSyncFolder.Width := 370;
 
   FBtnBrowseSync := TButton.Create(Self);
   FBtnBrowseSync.Parent := FGrpSync;
   FBtnBrowseSync.Left := 388;
-  FBtnBrowseSync.Top := 71;
+  FBtnBrowseSync.Top := 105;
   FBtnBrowseSync.Width := 45;
   FBtnBrowseSync.Height := 25;
   FBtnBrowseSync.Caption := '...';
   FBtnBrowseSync.OnClick := SyncBrowseClick;
 
+  FLblWebDavUrl := TLabel.Create(Self);
+  FLblWebDavUrl.Parent := FGrpSync;
+  FLblWebDavUrl.Left := 12;
+  FLblWebDavUrl.Top := 140;
+  FLblWebDavUrl.Caption := 'WebDAV URL:';
+
+  FEdtWebDavUrl := TEdit.Create(Self);
+  FEdtWebDavUrl.Parent := FGrpSync;
+  FEdtWebDavUrl.Left := 12;
+  FEdtWebDavUrl.Top := 158;
+  FEdtWebDavUrl.Width := 421;
+
+  FLblWebDavUser := TLabel.Create(Self);
+  FLblWebDavUser.Parent := FGrpSync;
+  FLblWebDavUser.Left := 12;
+  FLblWebDavUser.Top := 192;
+  FLblWebDavUser.Caption := 'WebDAV user:';
+
+  FEdtWebDavUser := TEdit.Create(Self);
+  FEdtWebDavUser.Parent := FGrpSync;
+  FEdtWebDavUser.Left := 170;
+  FEdtWebDavUser.Top := 188;
+  FEdtWebDavUser.Width := 200;
+
+  FLblWebDavPassword := TLabel.Create(Self);
+  FLblWebDavPassword.Parent := FGrpSync;
+  FLblWebDavPassword.Left := 12;
+  FLblWebDavPassword.Top := 224;
+  FLblWebDavPassword.Caption := 'WebDAV password:';
+
+  FEdtWebDavPassword := TEdit.Create(Self);
+  FEdtWebDavPassword.Parent := FGrpSync;
+  FEdtWebDavPassword.Left := 170;
+  FEdtWebDavPassword.Top := 220;
+  FEdtWebDavPassword.Width := 200;
+  FEdtWebDavPassword.PasswordChar := '*';
+
   FLblSyncInterval := TLabel.Create(Self);
   FLblSyncInterval.Parent := FGrpSync;
   FLblSyncInterval.Left := 12;
-  FLblSyncInterval.Top := 110;
+  FLblSyncInterval.Top := 256;
   FLblSyncInterval.Caption := 'Auto-sync every (minutes):';
 
   FEdtSyncInterval := TEdit.Create(Self);
   FEdtSyncInterval.Parent := FGrpSync;
   FEdtSyncInterval.Left := 170;
-  FEdtSyncInterval.Top := 106;
+  FEdtSyncInterval.Top := 252;
   FEdtSyncInterval.Width := 60;
 
   // Phase 4C: snapshot for the Cancel rollback path. Allocated once
@@ -236,6 +303,10 @@ begin
   FChkSyncEnabled.Checked := FSettings.SyncEnabled;
   FEdtSyncFolder.Text := FSettings.SyncFolder;
   FEdtSyncInterval.Text := FSettings.SyncIntervalMinutes.ToString;
+  FCbSyncBackend.ItemIndex := Ord(SameText(FSettings.SyncBackendType, 'webdav'));
+  FEdtWebDavUrl.Text := FSettings.SyncWebDavUrl;
+  FEdtWebDavUser.Text := FSettings.SyncWebDavUser;
+  FEdtWebDavPassword.Text := FCredentialStore.GetSecret(SyncWebDavCredentialTarget);
 end;
 
 procedure TSettingsForm.SaveControls;
@@ -260,6 +331,17 @@ begin
   FSettings.SyncEnabled := FChkSyncEnabled.Checked;
   FSettings.SyncFolder := Trim(FEdtSyncFolder.Text);
   FSettings.SyncIntervalMinutes := StrToIntDef(FEdtSyncInterval.Text, 15);
+  if FCbSyncBackend.ItemIndex = 1 then
+    FSettings.SyncBackendType := 'webdav'
+  else
+    FSettings.SyncBackendType := 'folder';
+  FSettings.SyncWebDavUrl := Trim(FEdtWebDavUrl.Text);
+  FSettings.SyncWebDavUser := Trim(FEdtWebDavUser.Text);
+  // The password never lands in settings.ini.
+  if FEdtWebDavPassword.Text <> '' then
+    FCredentialStore.SetSecret(SyncWebDavCredentialTarget, FEdtWebDavPassword.Text)
+  else
+    FCredentialStore.DeleteSecret(SyncWebDavCredentialTarget);
 end;
 
 procedure TSettingsForm.SyncBrowseClick(Sender: TObject);

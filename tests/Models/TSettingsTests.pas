@@ -310,10 +310,14 @@ begin
     Assert.IsFalse(S.SyncEnabled, 'sync is off by default');
     Assert.AreEqual<string>('', S.SyncFolder, 'no sync folder by default');
     Assert.AreEqual<Integer>(15, S.SyncIntervalMinutes, 'default sync interval is 15 minutes');
+    Assert.AreEqual<string>('folder', S.SyncBackendType, 'folder is the default backend');
 
     S.SyncEnabled := True;
     S.SyncFolder := 'D:\Cloud\VNotes';
     S.SyncIntervalMinutes := 5;
+    S.SyncBackendType := 'webdav';
+    S.SyncWebDavUrl := 'https://dav.example/notes';
+    S.SyncWebDavUser := 'alice';
     S.SaveToFile(TempFile);
 
     Loaded := TSettings.Create;
@@ -322,6 +326,9 @@ begin
       Assert.IsTrue(Loaded.SyncEnabled, 'SyncEnabled should round-trip');
       Assert.AreEqual<string>('D:\Cloud\VNotes', Loaded.SyncFolder, 'SyncFolder should round-trip');
       Assert.AreEqual<Integer>(5, Loaded.SyncIntervalMinutes, 'SyncIntervalMinutes should round-trip');
+      Assert.AreEqual<string>('webdav', Loaded.SyncBackendType, 'SyncBackendType should round-trip');
+      Assert.AreEqual<string>('https://dav.example/notes', Loaded.SyncWebDavUrl, 'WebDavUrl should round-trip');
+      Assert.AreEqual<string>('alice', Loaded.SyncWebDavUser, 'WebDavUser should round-trip');
     finally
       Loaded.Free;
     end;

@@ -33,6 +33,9 @@ type
     FSyncEnabled: Boolean;
     FSyncFolder: string;
     FSyncIntervalMinutes: Integer;
+    FSyncBackendType: string;
+    FSyncWebDavUrl: string;
+    FSyncWebDavUser: string;
     procedure SetDefaults;
   public
     constructor Create;
@@ -64,6 +67,9 @@ type
     property SyncEnabled: Boolean read FSyncEnabled write FSyncEnabled;
     property SyncFolder: string read FSyncFolder write FSyncFolder;
     property SyncIntervalMinutes: Integer read FSyncIntervalMinutes write FSyncIntervalMinutes;
+    property SyncBackendType: string read FSyncBackendType write FSyncBackendType;
+    property SyncWebDavUrl: string read FSyncWebDavUrl write FSyncWebDavUrl;
+    property SyncWebDavUser: string read FSyncWebDavUser write FSyncWebDavUser;
   end;
 
 implementation
@@ -105,6 +111,9 @@ begin
   FSyncEnabled := False;
   FSyncFolder := '';
   FSyncIntervalMinutes := 15;
+  FSyncBackendType := 'folder';
+  FSyncWebDavUrl := '';
+  FSyncWebDavUser := '';
 end;
 
 procedure TSettings.LoadFromFile(const AFileName: string);
@@ -142,6 +151,9 @@ begin
     FSyncEnabled := Ini.ReadBool('Sync', 'Enabled', FSyncEnabled);
     FSyncFolder := Ini.ReadString('Sync', 'Folder', FSyncFolder);
     FSyncIntervalMinutes := Ini.ReadInteger('Sync', 'IntervalMinutes', FSyncIntervalMinutes);
+    FSyncBackendType := Ini.ReadString('Sync', 'BackendType', FSyncBackendType);
+    FSyncWebDavUrl := Ini.ReadString('Sync', 'WebDavUrl', FSyncWebDavUrl);
+    FSyncWebDavUser := Ini.ReadString('Sync', 'WebDavUser', FSyncWebDavUser);
 
     LastBackupStr := Ini.ReadString('Backup', 'LastBackupAt', '');
     // Tolerant read: accepts the current offset-bearing format and the legacy
@@ -192,6 +204,9 @@ begin
     Ini.WriteBool('Sync', 'Enabled', FSyncEnabled);
     Ini.WriteString('Sync', 'Folder', FSyncFolder);
     Ini.WriteInteger('Sync', 'IntervalMinutes', FSyncIntervalMinutes);
+    Ini.WriteString('Sync', 'BackendType', FSyncBackendType);
+    Ini.WriteString('Sync', 'WebDavUrl', FSyncWebDavUrl);
+    Ini.WriteString('Sync', 'WebDavUser', FSyncWebDavUser);
   finally
     Ini.Free;
   end;
@@ -224,6 +239,9 @@ begin
   FSyncEnabled := Source.FSyncEnabled;
   FSyncFolder := Source.FSyncFolder;
   FSyncIntervalMinutes := Source.FSyncIntervalMinutes;
+  FSyncBackendType := Source.FSyncBackendType;
+  FSyncWebDavUrl := Source.FSyncWebDavUrl;
+  FSyncWebDavUser := Source.FSyncWebDavUser;
 end;
 
 end.
