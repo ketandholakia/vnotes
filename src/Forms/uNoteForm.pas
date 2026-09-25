@@ -182,6 +182,13 @@ begin
   TWindowUtils.EnableBorderlessWindow(Self);
   TWindowUtils.EnableRoundedCorners(Self);
 
+  // The note's context menu was declared in the DFM but never attached to
+  // anything, so right-clicking a note showed nothing (and Duplicate /
+  // Properties - which have no header button - were unreachable). Attaching
+  // it to the form makes right-clicks anywhere on the note open it: child
+  // controls without their own PopupMenu bubble up to the form's.
+  PopupMenu := pmNote;
+
   DoubleBuffered := True;
   KeyPreview     := True;
 
