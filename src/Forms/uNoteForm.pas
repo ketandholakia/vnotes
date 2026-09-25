@@ -826,6 +826,16 @@ procedure TNoteForm.CreateParams(var Params: TCreateParams);
 begin
   inherited;
   Params.Style := Params.Style or WS_THICKFRAME;
+  // A pinned note must stay above other applications. The VCL, however, strips
+  // WS_EX_TOPMOST from every window OWNED BY the application window whenever
+  // the app is deactivated (TApplication.NormalizeTopMosts on
+  // WM_ACTIVATEAPP(FALSE)). A background process cannot raise its own window
+  // again, so the only fix is to keep the note out of that set: create the
+  // window UNOWNED. Done here (at creation) rather than by patching styles
+  // afterwards, which breaks VCL's window bookkeeping.
+  Params.WndParent := 0;
+  // An unowned visible window would otherwise acquire a taskbar button.
+  Params.ExStyle := Params.ExStyle or WS_EX_TOOLWINDOW;
 end;
 
 procedure TNoteForm.WMNCHitTest(var Message: TWMNCHitTest);
