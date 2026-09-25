@@ -60,6 +60,15 @@ build.bat        REM canonical Win32 Debug build -> src\Win32\Debug\StickyNotes.
 build_tests.bat  REM DUnitX unit-test build -> tests\StickyNotes.Tests.exe
 ```
 
+### Continuous integration
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) builds the app and runs the DUnitX
+suite on every push and pull request. Delphi is commercial software that GitHub-hosted
+runners do not provide, so the job runs on a **self-hosted Windows runner** labelled
+`self-hosted, windows, delphi` with RAD Studio and Virtual-Tree-View installed. Optionally
+set the repository variables `DELPHI_ROOT` and `VTV_SRC` to point at the toolchain and
+Virtual-Tree-View source on that machine; if unset the build scripts auto-probe.
+
 ## Data Location
 
 ```

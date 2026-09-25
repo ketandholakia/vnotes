@@ -1,0 +1,60 @@
+name: CI
+
+# V-Notes targets Delphi / RAD Studio, which is commercial, licensed software and
+# is NOT available on GitHub-hosted runners. This pipeline therefore runs on a
+# SELF-HOSTED Windows runner that has RAD Studio and Virtual-Tree-View installed.
+#
+# Runner requirements:
+#   - OS: Windows 10/11, x64
+#   - RAD Studio / Delphi installed (11 Alexandria or later)
+#   - Virtual-Tree-View source present (VirtualTrees.pas)
+#   - Runner labels: self-hosted, windows, delphi
+#
+# Optional repository variables
+# (GitHub: Settings -> Secrets and variables -> Actions -> Variables):
+#   DELPHI_ROOT   e.g. C:\Program Files (x86)\Embarcadero\Studio\23.0
+#   VTV_SRC       e.g. D:\delphi\vcl\Athens_vcl\03_Virtual-Tree-View-8.3\Source
+# When unset, build.bat / build_tests.bat auto-probe Delphi 23.0 -> 22.0 -> 21.0
+# and fall back to their built-in Virtual-Tree-View default path.
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build + tests (Delphi, Win32)
+    runs-on: [self-hosted, windows, delphi]
+    timeout-minutes: 30
+    env:
+      DELPHI_ROOT: ${{ vars.DELPHI_ROOT }}
+      VTV_SRC: ${{ vars.VTV_SRC }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build application (build.bat)
+        shell: cmd
+        run: build.bat
+
+      - name: Build test suite (build_tests.bat)
+        shell: cmd
+        run: build_tests.bat
+
+      - name: Run unit tests (isolated APPDATA)
+        shell: pwsh
+        run: |
+          $isolated = Join-Path $env:RUNNER_TEMP 'vnotes-ci-appdata'
+          New-Item -ItemType Directory -Force -Path $isolated | Out-Null
+          $env:APPDATA = $isolated
+          Write-Host "APPDATA -> $env:APPDATA"
+          .\tests\StickyNotes.Tests.exe
+          if ($LASTEXITCODE -ne 0) {
+            throw "Unit tests failed (exit code $LASTEXITCODE)"
+          }
