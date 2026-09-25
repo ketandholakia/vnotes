@@ -9,7 +9,8 @@ uses
   uNote, uNoteManager, uSettings, uSettingsController,
   uAutosaveService, uHotkeyService, uThemeService, uBackupService,
   uBackupScheduler, uServiceInterfaces,
-  uStorage, uJsonStorage, uStorageResolver, uStorageMigrationOrchestrator;
+  uStorage, uJsonStorage, uStorageResolver, uStorageMigrationOrchestrator,
+  uILogger;
 
 type
   TNoteApplication = class
@@ -104,6 +105,10 @@ begin
   end
   else
     FAppDataPath := GetAppDataPath;
+
+  // Route diagnostics to a file so crash / telemetry output is actually
+  // captured (ILogger otherwise only writes to OutputDebugString).
+  ConfigureLogFile(TPath.Combine(FAppDataPath, 'vnotes.log'));
 
   SettingsIniPath := TPath.Combine(FAppDataPath, 'settings.ini');
   FSettingsController := TSettingsController.Create(SettingsIniPath);

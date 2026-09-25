@@ -93,7 +93,11 @@ begin
         begin
           Res := Query.Fields[0].AsString;
           if SameText(Res, 'ok') then
-            Result := True
+          begin
+            Result := True;
+            if ALogger <> nil then
+              ALogger.Info('SQLite database validation passed (quick_check: ok)');
+          end
           else if ALogger <> nil then
             ALogger.Error('SQLite database validation failed (quick_check): ' + Res);
         end;

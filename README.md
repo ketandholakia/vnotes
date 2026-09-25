@@ -74,6 +74,7 @@ Virtual-Tree-View source on that machine; if unset the build scripts auto-probe.
 ```
 %APPDATA%\StickyNotes\
 ├── settings.ini
+├── vnotes.log          (diagnostics; rotates at ~2 MB)
 └── notes\
     ├── 0000000001.json
     └── ...

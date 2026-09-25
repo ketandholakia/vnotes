@@ -25,7 +25,8 @@ uses
   TPhase6MActivationTests in 'Models\TPhase6MActivationTests.pas',
   uIso8601 in '..\src\Utils\uIso8601.pas',
   TNoteTimestampTests in 'Models\TNoteTimestampTests.pas',
-  TStorageResolverTests in 'Models\TStorageResolverTests.pas';
+  TStorageResolverTests in 'Models\TStorageResolverTests.pas',
+  TLoggerTests in 'Models\TLoggerTests.pas';
 
 var
   runner: ITestRunner;

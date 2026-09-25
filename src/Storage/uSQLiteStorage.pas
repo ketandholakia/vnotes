@@ -23,6 +23,7 @@ type
     FLogger: ILogger;
     procedure EnsureDirectories;
     procedure InitDatabaseSchema;
+    procedure CheckIntegrity;
     procedure LoadTagsForNote(const ANote: TNote);
     procedure LoadChecklistForNote(const ANote: TNote);
     procedure SaveTagsForNote(const ANote: TNote);
@@ -133,6 +134,9 @@ begin
     InitDatabaseSchema;
   end;
 
+  // Surface corruption at startup rather than at the first failed save.
+  CheckIntegrity;
+
   Query := TFDQuery.Create(nil);
   try
     Query.Connection := FConnection;
@@ -143,6 +147,35 @@ begin
       FNextID := 1;
   finally
     Query.Free;
+  end;
+end;
+
+procedure TSQLiteStorage.CheckIntegrity;
+var
+  Q: TFDQuery;
+  Res: string;
+begin
+  if FConnection = nil then Exit;
+  Q := TFDQuery.Create(nil);
+  try
+    try
+      Q.Connection := FConnection;
+      Q.SQL.Text := 'PRAGMA quick_check;';
+      Q.Open;
+      if not Q.Eof then
+      begin
+        Res := Q.Fields[0].AsString;
+        if SameText(Res, 'ok') then
+          FLogger.Info('SQLite integrity check passed (quick_check: ok)')
+        else
+          FLogger.Error('SQLite integrity check FAILED (quick_check): ' + Res);
+      end;
+    except
+      on E: Exception do
+        FLogger.Error('SQLite integrity check error: ' + E.Message);
+    end;
+  finally
+    Q.Free;
   end;
 end;
 

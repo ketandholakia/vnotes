@@ -13,10 +13,72 @@ type
 
   function CreateLogger: ILogger;
 
+  // Routes every logger instance to a file, in addition to OutputDebugString.
+  // Call once at application startup with e.g. <AppData>\vnotes.log so crash /
+  // telemetry output survives the process (OutputDebugString alone is invisible
+  // unless a debugger is attached). Pass '' to disable file output.
+  // Safe to call more than once; the last call wins. Thread-safe.
+  procedure ConfigureLogFile(const ALogFilePath: string);
+
+  // The active file sink path ('' when disabled). Exposed for tests/diagnostics.
+  function GetLogFilePath: string;
+
 implementation
 
 uses
-  Winapi.Windows, System.SysUtils, System.Classes;
+  Winapi.Windows, System.SysUtils, System.Classes, System.SyncObjs,
+  System.IOUtils;
+
+const
+  MaxLogBytes = 2 * 1024 * 1024; // rotate once at ~2 MB
+
+var
+  GLogFilePath: string = '';
+  GLogLock: TCriticalSection;
+
+procedure ConfigureLogFile(const ALogFilePath: string);
+begin
+  GLogLock.Enter;
+  try
+    GLogFilePath := ALogFilePath;
+  finally
+    GLogLock.Leave;
+  end;
+end;
+
+function GetLogFilePath: string;
+begin
+  GLogLock.Enter;
+  try
+    Result := GLogFilePath;
+  finally
+    GLogLock.Leave;
+  end;
+end;
+
+// Appends one line, rotating to "<path>.1" once when the file grows too large.
+// Best-effort: every failure is swallowed so logging can never crash the app.
+procedure AppendLine(const APath, ALine: string);
+var
+  Dir: string;
+begin
+  try
+    Dir := TPath.GetDirectoryName(APath);
+    if Dir <> '' then
+      TDirectory.CreateDirectory(Dir);
+
+    if TFile.Exists(APath) and (TFile.GetSize(APath) > MaxLogBytes) then
+    begin
+      if TFile.Exists(APath + '.1') then
+        TFile.Delete(APath + '.1');
+      TFile.Move(APath, APath + '.1');
+    end;
+
+    TFile.AppendAllText(APath, ALine + sLineBreak, TEncoding.UTF8);
+  except
+    // Diagnostics must never break the application.
+  end;
+end;
 
 type
   TLogger = class(TInterfacedObject, ILogger)
@@ -72,9 +134,25 @@ begin
 end;
 
 procedure TLogger.Output(const AMessage: string; ALevel: Integer);
+var
+  Line: string;
 begin
   if not FActive then Exit;
-  OutputDebugString(PChar(Format('[%s] %s', [TLogger.LogLevelToString(ALevel), AMessage])));
+
+  Line := Format('[%s][%s] %s',
+    [FormatDateTime('yyyy-mm-dd hh:nn:ss.zzz', Now),
+     TLogger.LogLevelToString(ALevel),
+     AMessage]);
+
+  OutputDebugString(PChar(Line));
+
+  GLogLock.Enter;
+  try
+    if GLogFilePath <> '' then
+      AppendLine(GLogFilePath, Line);
+  finally
+    GLogLock.Leave;
+  end;
 end;
 
 class function TLogger.LogLevelToString(ALevel: Integer): string;
@@ -97,5 +175,11 @@ begin
   if Logger is TLogger then
     TLogger(Logger).Output(AMessage, ALevel);
 end;
+
+initialization
+  GLogLock := TCriticalSection.Create;
+
+finalization
+  GLogLock.Free;
 
 end.
