@@ -132,6 +132,8 @@ Register it in `TStorageResolver.ResolveStorage` (`src/Storage/uStorageResolver.
 | 7 | Cloud sync |
 | 8 | Plugins, reminders, tags |
 
+Phase 7 (cloud sync) has a design analysis: see [docs/PHASE_7_CLOUD_SYNC_DESIGN.md](docs/PHASE_7_CLOUD_SYNC_DESIGN.md).
+
 ## License
 
 MIT License
