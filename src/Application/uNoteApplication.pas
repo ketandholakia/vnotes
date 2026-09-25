@@ -10,7 +10,7 @@ uses
   uAutosaveService, uHotkeyService, uThemeService, uBackupService,
   uBackupScheduler, uServiceInterfaces,
   uStorage, uJsonStorage, uStorageResolver, uStorageMigrationOrchestrator,
-  uFolderSyncBackend, uSyncEngine,
+  uFolderSyncBackend, uSyncEngine, uSyncScheduler,
   uILogger;
 
 type
@@ -26,6 +26,7 @@ type
     FStorage: INoteStorage;
     FAppDataPath: string;
     FSyncService: ISyncService;
+    FSyncScheduler: ISyncScheduler;
 
     FOnNoteCreated: TNoteEvent;
     FOnNoteChanged: TNoteEvent;
@@ -58,6 +59,8 @@ type
     // Phase 7B: (re)build the sync engine from current settings. Called at
     // construction and by the tray form after the user edits settings.
     procedure ApplySyncSettings;
+    // Phase 7D: re-arm the periodic sync schedule from current settings.
+    procedure RefreshSyncSchedule;
     // Request to open/close all note windows - fires OnNoteOpenRequested/OnNoteCloseRequested events
     procedure RequestOpenAllNotes;
     procedure RequestCloseAllNotes;
@@ -69,6 +72,7 @@ type
     property HotkeyService: IHotkeyService read FHotkeyService;
     property BackupService: IBackupService read FBackupService;
     property SyncService: ISyncService read FSyncService;
+    property SyncScheduler: ISyncScheduler read FSyncScheduler;
     property BackupScheduler: IBackupScheduler read FBackupScheduler;
     property AppDataPath: string read FAppDataPath;
 
@@ -180,6 +184,7 @@ end;
 destructor TNoteApplication.Destroy;
 begin
   Shutdown;
+  FSyncScheduler := nil;
   FSyncService := nil;
   FBackupScheduler := nil;
   FBackupService := nil;
@@ -207,6 +212,10 @@ begin
   // Phase 4C: arm the periodic backup schedule with the loaded settings.
   if FBackupScheduler <> nil then
     FBackupScheduler.Start;
+
+  // Phase 7D: arm the periodic sync schedule with the loaded settings.
+  if FSyncScheduler <> nil then
+    FSyncScheduler.Start;
 end;
 
 procedure TNoteApplication.Shutdown;
@@ -216,6 +225,8 @@ begin
   // unguarded call here crashed with an AV that masked the original error.
   if FBackupScheduler <> nil then
     FBackupScheduler.Stop;
+  if FSyncScheduler <> nil then
+    FSyncScheduler.Stop;
   if FAutosaveService <> nil then
     FAutosaveService.Flush;
   SaveSettings;
@@ -233,7 +244,8 @@ procedure TNoteApplication.ApplySyncSettings;
 var
   Folder: string;
 begin
-  FSyncService := nil; // drop any previously configured engine
+  FSyncScheduler := nil; // drop any previously configured scheduler
+  FSyncService := nil;   // ... and its engine
   if FSettingsController = nil then Exit;
   if not FSettingsController.GetSettings.SyncEnabled then Exit;
   Folder := Trim(FSettingsController.GetSettings.SyncFolder);
@@ -242,6 +254,14 @@ begin
     FNoteManager,
     TFolderSyncBackend.Create(Folder),
     TPath.Combine(FAppDataPath, 'sync-state.json'));
+  // The scheduler is armed later by Initialize / RefreshSyncSchedule.
+  FSyncScheduler := TSyncScheduler.Create(FSyncService, FSettingsController.GetSettings);
+end;
+
+procedure TNoteApplication.RefreshSyncSchedule;
+begin
+  if FSyncScheduler <> nil then
+    FSyncScheduler.Refresh;
 end;
 
 procedure TNoteApplication.RequestOpenAllNotes;

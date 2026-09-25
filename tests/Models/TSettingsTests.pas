@@ -309,9 +309,11 @@ begin
   try
     Assert.IsFalse(S.SyncEnabled, 'sync is off by default');
     Assert.AreEqual<string>('', S.SyncFolder, 'no sync folder by default');
+    Assert.AreEqual<Integer>(15, S.SyncIntervalMinutes, 'default sync interval is 15 minutes');
 
     S.SyncEnabled := True;
     S.SyncFolder := 'D:\Cloud\VNotes';
+    S.SyncIntervalMinutes := 5;
     S.SaveToFile(TempFile);
 
     Loaded := TSettings.Create;
@@ -319,6 +321,7 @@ begin
       Loaded.LoadFromFile(TempFile);
       Assert.IsTrue(Loaded.SyncEnabled, 'SyncEnabled should round-trip');
       Assert.AreEqual<string>('D:\Cloud\VNotes', Loaded.SyncFolder, 'SyncFolder should round-trip');
+      Assert.AreEqual<Integer>(5, Loaded.SyncIntervalMinutes, 'SyncIntervalMinutes should round-trip');
     finally
       Loaded.Free;
     end;

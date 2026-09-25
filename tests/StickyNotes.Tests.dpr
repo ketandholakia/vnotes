@@ -27,7 +27,8 @@ uses
   TNoteTimestampTests in 'Models\TNoteTimestampTests.pas',
   TStorageResolverTests in 'Models\TStorageResolverTests.pas',
   TLoggerTests in 'Models\TLoggerTests.pas',
-  TSyncEngineTests in 'Models\TSyncEngineTests.pas';
+  TSyncEngineTests in 'Models\TSyncEngineTests.pas',
+  TSyncSchedulerTests in 'Models\TSyncSchedulerTests.pas';
 
 var
   runner: ITestRunner;

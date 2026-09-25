@@ -74,6 +74,8 @@ type
     FLblSyncFolder: TLabel;
     FEdtSyncFolder: TEdit;
     FBtnBrowseSync: TButton;
+    FLblSyncInterval: TLabel;
+    FEdtSyncInterval: TEdit;
     procedure LoadControls;
     procedure SaveControls;
     procedure SyncBrowseClick(Sender: TObject);
@@ -126,7 +128,7 @@ begin
   FGrpSync.Left := 16;
   FGrpSync.Top := 152;
   FGrpSync.Width := 441;
-  FGrpSync.Height := 105;
+  FGrpSync.Height := 160;
   FGrpSync.Caption := 'Sync Settings';
 
   FChkSyncEnabled := TCheckBox.Create(Self);
@@ -156,6 +158,18 @@ begin
   FBtnBrowseSync.Height := 25;
   FBtnBrowseSync.Caption := '...';
   FBtnBrowseSync.OnClick := SyncBrowseClick;
+
+  FLblSyncInterval := TLabel.Create(Self);
+  FLblSyncInterval.Parent := FGrpSync;
+  FLblSyncInterval.Left := 12;
+  FLblSyncInterval.Top := 110;
+  FLblSyncInterval.Caption := 'Auto-sync every (minutes):';
+
+  FEdtSyncInterval := TEdit.Create(Self);
+  FEdtSyncInterval.Parent := FGrpSync;
+  FEdtSyncInterval.Left := 170;
+  FEdtSyncInterval.Top := 106;
+  FEdtSyncInterval.Width := 60;
 
   // Phase 4C: snapshot for the Cancel rollback path. Allocated once
   // per form instance and refreshed by LoadSettings. Released in
@@ -221,6 +235,7 @@ begin
   edtBackupRetention.Text := FSettings.BackupRetentionDays.ToString;
   FChkSyncEnabled.Checked := FSettings.SyncEnabled;
   FEdtSyncFolder.Text := FSettings.SyncFolder;
+  FEdtSyncInterval.Text := FSettings.SyncIntervalMinutes.ToString;
 end;
 
 procedure TSettingsForm.SaveControls;
@@ -244,6 +259,7 @@ begin
   FSettings.BackupRetentionDays := StrToIntDef(edtBackupRetention.Text, 30);
   FSettings.SyncEnabled := FChkSyncEnabled.Checked;
   FSettings.SyncFolder := Trim(FEdtSyncFolder.Text);
+  FSettings.SyncIntervalMinutes := StrToIntDef(FEdtSyncInterval.Text, 15);
 end;
 
 procedure TSettingsForm.SyncBrowseClick(Sender: TObject);

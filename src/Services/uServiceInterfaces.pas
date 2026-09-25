@@ -140,6 +140,23 @@ type
     property OnComplete: TSyncComplete read GetOnComplete write SetOnComplete;
   end;
 
+  // Phase 7D: periodic background sync, mirroring IBackupScheduler.
+  ISyncScheduler = interface
+    ['{A1B2C3D4-E5F6-7890-ABCD-EF1234567901}']
+    procedure Start;
+    procedure Stop;
+    procedure Refresh;
+    procedure TickNow;
+    function GetIsRunning: Boolean;
+    function GetIsBusy: Boolean;
+    function GetLastSyncAt: TDateTime;
+    function GetIntervalMinutes: Integer;
+    property IsRunning: Boolean read GetIsRunning;
+    property IsBusy: Boolean read GetIsBusy;
+    property LastSyncAt: TDateTime read GetLastSyncAt;
+    property IntervalMinutes: Integer read GetIntervalMinutes;
+  end;
+
 implementation
 
 end.

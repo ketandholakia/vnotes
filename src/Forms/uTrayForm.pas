@@ -296,6 +296,8 @@ begin
 
         // Phase 7B: rebuild the sync engine from the new Sync settings.
         FApplication.ApplySyncSettings;
+        // Phase 7D: re-arm periodic sync with the new interval.
+        FApplication.RefreshSyncSchedule;
         if miSyncNow <> nil then
           miSyncNow.Enabled := FApplication.SyncService <> nil;
 

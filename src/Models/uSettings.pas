@@ -32,6 +32,7 @@ type
     FMigrationTimestamp: string;
     FSyncEnabled: Boolean;
     FSyncFolder: string;
+    FSyncIntervalMinutes: Integer;
     procedure SetDefaults;
   public
     constructor Create;
@@ -62,6 +63,7 @@ type
     // Phase 7B: cloud/file sync (folder backend). Empty folder = not configured.
     property SyncEnabled: Boolean read FSyncEnabled write FSyncEnabled;
     property SyncFolder: string read FSyncFolder write FSyncFolder;
+    property SyncIntervalMinutes: Integer read FSyncIntervalMinutes write FSyncIntervalMinutes;
   end;
 
 implementation
@@ -102,6 +104,7 @@ begin
   FMigrationTimestamp := '';
   FSyncEnabled := False;
   FSyncFolder := '';
+  FSyncIntervalMinutes := 15;
 end;
 
 procedure TSettings.LoadFromFile(const AFileName: string);
@@ -138,6 +141,7 @@ begin
 
     FSyncEnabled := Ini.ReadBool('Sync', 'Enabled', FSyncEnabled);
     FSyncFolder := Ini.ReadString('Sync', 'Folder', FSyncFolder);
+    FSyncIntervalMinutes := Ini.ReadInteger('Sync', 'IntervalMinutes', FSyncIntervalMinutes);
 
     LastBackupStr := Ini.ReadString('Backup', 'LastBackupAt', '');
     // Tolerant read: accepts the current offset-bearing format and the legacy
@@ -187,6 +191,7 @@ begin
     Ini.WriteString('Storage', 'MigrationTimestamp', FMigrationTimestamp);
     Ini.WriteBool('Sync', 'Enabled', FSyncEnabled);
     Ini.WriteString('Sync', 'Folder', FSyncFolder);
+    Ini.WriteInteger('Sync', 'IntervalMinutes', FSyncIntervalMinutes);
   finally
     Ini.Free;
   end;
@@ -218,6 +223,7 @@ begin
   FMigrationTimestamp := Source.FMigrationTimestamp;
   FSyncEnabled := Source.FSyncEnabled;
   FSyncFolder := Source.FSyncFolder;
+  FSyncIntervalMinutes := Source.FSyncIntervalMinutes;
 end;
 
 end.
