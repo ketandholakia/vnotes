@@ -24,6 +24,8 @@ type
     procedure EnsureDirectories;
     procedure InitDatabaseSchema;
     procedure CheckIntegrity;
+    procedure SetSchemaVersion(const AVersion: Integer);
+    procedure ApplySchemaMigrations(const AFromVersion: Integer);
     procedure LoadTagsForNote(const ANote: TNote);
     procedure LoadChecklistForNote(const ANote: TNote);
     procedure SaveTagsForNote(const ANote: TNote);
@@ -41,6 +43,8 @@ type
     procedure CommitTransaction;
     procedure RollbackTransaction;
     function IsInTransaction: Boolean;
+    // Stored schema version (`PRAGMA user_version`); see NoteSchemaVersion.
+    function GetSchemaVersion: Integer;
   end;
 
 implementation
@@ -112,12 +116,14 @@ begin
     ');'
   );
 
-  FConnection.ExecSQL('PRAGMA user_version = 1;');
+  // The version stamp is written by Initialize once any migration has run, so a
+  // failure mid-migration can never leave a bumped version behind.
 end;
 
 procedure TSQLiteStorage.Initialize;
 var
   Query: TFDQuery;
+  DbVersion: Integer;
 begin
   EnsureDirectories;
   if FConnection = nil then
@@ -131,7 +137,34 @@ begin
     FConnection.Params.Values['Pooled'] := 'False';
     FConnection.Open;
 
+    // Refuse a database written by a newer build BEFORE touching its schema.
+    DbVersion := GetSchemaVersion;
+    if DbVersion > NoteSchemaVersion then
+    begin
+      FLogger.Error(Format(
+        'SQLite schema version %d is newer than supported version %d; refusing to open %s',
+        [DbVersion, NoteSchemaVersion, FDatabasePath]));
+      raise EInvalidOperation.CreateFmt(
+        'SQLite database "%s" uses schema version %d but this build supports only up to %d. ' +
+        'Update the application or open it with the newer build.',
+        [FDatabasePath, DbVersion, NoteSchemaVersion]);
+    end;
+
     InitDatabaseSchema;
+
+    if DbVersion = 0 then
+    begin
+      SetSchemaVersion(NoteSchemaVersion);
+      FLogger.Info(Format('SQLite schema initialised at v%d (%s)',
+        [NoteSchemaVersion, FDatabasePath]));
+    end
+    else if DbVersion < NoteSchemaVersion then
+    begin
+      ApplySchemaMigrations(DbVersion);
+      SetSchemaVersion(NoteSchemaVersion);
+      FLogger.Info(Format('SQLite schema upgraded v%d -> v%d (%s)',
+        [DbVersion, NoteSchemaVersion, FDatabasePath]));
+    end;
   end;
 
   // Surface corruption at startup rather than at the first failed save.
@@ -148,6 +181,38 @@ begin
   finally
     Query.Free;
   end;
+end;
+
+function TSQLiteStorage.GetSchemaVersion: Integer;
+var
+  Q: TFDQuery;
+begin
+  Result := 0;
+  if FConnection = nil then Exit;
+  Q := TFDQuery.Create(nil);
+  try
+    Q.Connection := FConnection;
+    Q.SQL.Text := 'PRAGMA user_version;';
+    Q.Open;
+    if not Q.Eof then
+      Result := Q.Fields[0].AsInteger;
+  finally
+    Q.Free;
+  end;
+end;
+
+procedure TSQLiteStorage.SetSchemaVersion(const AVersion: Integer);
+begin
+  if FConnection = nil then Exit;
+  FConnection.ExecSQL('PRAGMA user_version = ' + IntToStr(AVersion) + ';');
+end;
+
+procedure TSQLiteStorage.ApplySchemaMigrations(const AFromVersion: Integer);
+begin
+  // v0/v1/v2 -> v3 require no DDL here: the notes / note_tags /
+  // note_checklist_items tables and the "favorite" column already existed, i.e.
+  // the stored data was always note-schema-v3 equivalent. This hook exists so a
+  // future structural change is applied explicitly instead of being assumed.
 end;
 
 procedure TSQLiteStorage.CheckIntegrity;

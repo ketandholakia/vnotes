@@ -5,7 +5,8 @@ interface
 uses
   System.SysUtils, System.Classes, System.IOUtils, System.Generics.Collections,
   System.DateUtils,
-  DUnitX.TestFramework, uSQLiteStorage, uJsonStorage, uNote, uEnums, uILogger;
+  DUnitX.TestFramework, uStorage, uSQLiteStorage, uJsonStorage, uNote, uEnums, uILogger,
+  FireDAC.Comp.Client;
 
 type
   [TestFixture]
@@ -47,6 +48,12 @@ type
     procedure TestOuterTransactionRollback;
     [Test]
     procedure TestSaveNoteDoesNotRollbackOuterTransactionOnFailure;
+    [Test]
+    procedure TestSchemaVersionInitialisedAtCurrent;
+    [Test]
+    procedure TestOlderSchemaVersionIsUpgraded;
+    [Test]
+    procedure TestNewerSchemaVersionIsRejected;
   end;
 
 implementation
@@ -749,6 +756,100 @@ begin
 
     Storage.RollbackTransaction;
     Assert.IsFalse(Storage.IsInTransaction);
+  finally
+    Storage.Free;
+    if TDirectory.Exists(TempDir) then
+      TDirectory.Delete(TempDir, True);
+  end;
+end;
+
+procedure TSQLiteStorageTestFixture.TestSchemaVersionInitialisedAtCurrent;
+var
+  Storage: TSQLiteStorage;
+  TempDir: string;
+begin
+  TempDir := TPath.Combine(TPath.GetTempPath,
+    'StickyNotes_SQLiteTest_SchemaVer_' + IntToStr(TThread.GetTickCount));
+  Storage := TSQLiteStorage.Create(TempDir);
+  try
+    Storage.Initialize;
+    Assert.AreEqual<Integer>(NoteSchemaVersion, Storage.GetSchemaVersion,
+      'a new database should be stamped with the current schema version');
+  finally
+    Storage.Free;
+    if TDirectory.Exists(TempDir) then
+      TDirectory.Delete(TempDir, True);
+  end;
+end;
+
+procedure TSQLiteStorageTestFixture.TestOlderSchemaVersionIsUpgraded;
+var
+  Storage: TSQLiteStorage;
+  TempDir, DbFile: string;
+  Conn: TFDConnection;
+begin
+  TempDir := TPath.Combine(TPath.GetTempPath,
+    'StickyNotes_SQLiteTest_SchemaUp_' + IntToStr(TThread.GetTickCount));
+  ForceDirectories(TempDir);
+  DbFile := TPath.Combine(TempDir, 'vnotes.db');
+
+  // Create a database stamped with a previous schema version.
+  Conn := TFDConnection.Create(nil);
+  try
+    Conn.DriverName := 'SQLite';
+    Conn.Params.Values['Database'] := DbFile;
+    Conn.Params.Values['OpenMode'] := 'ReadWriteCreate';
+    Conn.Open;
+    Conn.ExecSQL('PRAGMA user_version = 1;');
+    Conn.Close;
+  finally
+    Conn.Free;
+  end;
+
+  Storage := TSQLiteStorage.Create(TempDir);
+  try
+    Storage.Initialize;
+    Assert.AreEqual<Integer>(NoteSchemaVersion, Storage.GetSchemaVersion,
+      'an older database should be upgraded to the current schema version');
+  finally
+    Storage.Free;
+    if TDirectory.Exists(TempDir) then
+      TDirectory.Delete(TempDir, True);
+  end;
+end;
+
+procedure TSQLiteStorageTestFixture.TestNewerSchemaVersionIsRejected;
+var
+  Storage: TSQLiteStorage;
+  TempDir, DbFile: string;
+  Conn: TFDConnection;
+begin
+  TempDir := TPath.Combine(TPath.GetTempPath,
+    'StickyNotes_SQLiteTest_SchemaNew_' + IntToStr(TThread.GetTickCount));
+  ForceDirectories(TempDir);
+  DbFile := TPath.Combine(TempDir, 'vnotes.db');
+
+  Conn := TFDConnection.Create(nil);
+  try
+    Conn.DriverName := 'SQLite';
+    Conn.Params.Values['Database'] := DbFile;
+    Conn.Params.Values['OpenMode'] := 'ReadWriteCreate';
+    Conn.Open;
+    Conn.ExecSQL('PRAGMA user_version = 99;');
+    Conn.Close;
+  finally
+    Conn.Free;
+  end;
+
+  Storage := TSQLiteStorage.Create(TempDir);
+  try
+    Assert.WillRaise(
+      procedure
+      begin
+        Storage.Initialize;
+      end,
+      EInvalidOperation,
+      'a database from a newer build must be refused, not silently opened');
   finally
     Storage.Free;
     if TDirectory.Exists(TempDir) then

@@ -24,7 +24,7 @@ type
       // v3 = adds "favorite" (boolean). Absent on v0/v1/v2 files, or
       //      wrong-typed, -> read as False (same tolerant policy as the
       //      other boolean flags).
-      CURRENT_SCHEMA_VERSION = 3;
+      CURRENT_SCHEMA_VERSION = NoteSchemaVersion;
       // Unversioned (pre-versioning) files are interpreted as schema 0.
       LEGACY_SCHEMA_VERSION = 0;
       SCHEMA_VERSION_FIELD = 'schemaVersion';
