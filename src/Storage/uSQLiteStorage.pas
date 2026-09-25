@@ -11,7 +11,7 @@ uses
   FireDAC.Phys.SQLiteDef, FireDAC.Stan.ExprFuncs, FireDAC.Phys.SQLiteWrapper.Stat,
   FireDAC.VCLUI.Wait, FireDAC.Comp.UI, FireDAC.Stan.Param, FireDAC.DatS,
   FireDAC.DApt.Intf, FireDAC.DApt, FireDAC.Comp.DataSet,
-  uStorage, uNote, uEnums, uILogger, uIso8601;
+  uStorage, uNote, uEnums, uILogger, uIso8601, uIdentity;
 
 type
   TSQLiteStorage = class(TInterfacedObject, INoteStorage)
@@ -20,12 +20,14 @@ type
     FDatabasePath: string;
     FConnection: TFDConnection;
     FNextID: Int64;
+    FDeviceId: string;
     FLogger: ILogger;
     procedure EnsureDirectories;
     procedure InitDatabaseSchema;
     procedure CheckIntegrity;
     procedure SetSchemaVersion(const AVersion: Integer);
     procedure ApplySchemaMigrations(const AFromVersion: Integer);
+    procedure AddColumnIfMissing(const AColumn, AType: string);
     procedure LoadTagsForNote(const ANote: TNote);
     procedure LoadChecklistForNote(const ANote: TNote);
     procedure SaveTagsForNote(const ANote: TNote);
@@ -91,7 +93,12 @@ begin
     '  locked INTEGER,' +
     '  favorite INTEGER,' +
     '  created_at TEXT,' +
-    '  updated_at TEXT' +
+    '  updated_at TEXT,' +
+    '  guid TEXT,' +
+    '  rev INTEGER,' +
+    '  device_id TEXT,' +
+    '  deleted INTEGER,' +
+    '  deleted_at TEXT' +
     ');'
   );
 
@@ -209,10 +216,33 @@ end;
 
 procedure TSQLiteStorage.ApplySchemaMigrations(const AFromVersion: Integer);
 begin
-  // v0/v1/v2 -> v3 require no DDL here: the notes / note_tags /
-  // note_checklist_items tables and the "favorite" column already existed, i.e.
-  // the stored data was always note-schema-v3 equivalent. This hook exists so a
-  // future structural change is applied explicitly instead of being assumed.
+  // v0/v1/v2 -> v3 required no DDL: the notes / note_tags /
+  // note_checklist_items tables and the "favorite" column already existed.
+  //
+  // v3 -> v4 (Phase 7A) adds the sync-identity columns. SQLite has no
+  // "ADD COLUMN IF NOT EXISTS", so each statement is attempted and a
+  // duplicate-column error tolerated, keeping a partial migration recoverable.
+  if AFromVersion < 4 then
+  begin
+    AddColumnIfMissing('guid', 'TEXT');
+    AddColumnIfMissing('rev', 'INTEGER');
+    AddColumnIfMissing('device_id', 'TEXT');
+    AddColumnIfMissing('deleted', 'INTEGER');
+    AddColumnIfMissing('deleted_at', 'TEXT');
+  end;
+end;
+
+procedure TSQLiteStorage.AddColumnIfMissing(const AColumn, AType: string);
+begin
+  if FConnection = nil then Exit;
+  try
+    FConnection.ExecSQL(Format('ALTER TABLE notes ADD COLUMN %s %s', [AColumn, AType]));
+  except
+    on E: Exception do
+      // The expected case on a re-run is "duplicate column name".
+      FLogger.Debug(Format('ApplySchemaMigrations: ADD COLUMN %s skipped: %s',
+        [AColumn, E.Message]));
+  end;
 end;
 
 procedure TSQLiteStorage.CheckIntegrity;
@@ -342,6 +372,14 @@ begin
         Note.Collapsed := Query.FieldByName('collapsed').AsInteger <> 0;
         Note.Locked := Query.FieldByName('locked').AsInteger <> 0;
         Note.Favorite := Query.FieldByName('favorite').AsInteger <> 0;
+        // Phase 7A sync identity (columns added by ApplySchemaMigrations v3->v4).
+        Note.Guid := Query.FieldByName('guid').AsString;
+        Note.Rev := Query.FieldByName('rev').AsLargeInt;
+        if Note.Rev < 1 then
+          Note.Rev := 1;
+        Note.DeviceId := Query.FieldByName('device_id').AsString;
+        Note.Deleted := Query.FieldByName('deleted').AsInteger <> 0;
+        Note.DeletedAt := StoredISO8601ToDateTime(Query.FieldByName('deleted_at').AsString, 0);
         // Tolerant read: legacy rows hold offset-less local wall-clock, current
         // rows hold an explicit offset (CODE_REVIEW_2026-09-17 C1).
         Note.CreatedAt := StoredISO8601ToDateTime(Query.FieldByName('created_at').AsString, Now);
@@ -452,6 +490,13 @@ begin
   if ANote = nil then Exit;
   if FConnection = nil then Initialize;
 
+  // Phase 7A: stamp sync identity (see docs/PHASE_7_CLOUD_SYNC_DESIGN.md).
+  if ANote.Guid = '' then
+    ANote.Guid := GenerateNoteGuid;
+  if FDeviceId = '' then
+    FDeviceId := GetOrCreateDeviceId(FBasePath);
+  ANote.DeviceId := FDeviceId;
+
   WillCommit := not FConnection.InTransaction;
   if WillCommit then
     FConnection.StartTransaction;
@@ -462,10 +507,12 @@ begin
       Query.SQL.Text :=
         'INSERT INTO notes (' +
         '  id, title, content, color, left_pos, top_pos, width, height, ' +
-        '  always_on_top, collapsed, locked, favorite, created_at, updated_at' +
+        '  always_on_top, collapsed, locked, favorite, created_at, updated_at, ' +
+        '  guid, rev, device_id, deleted, deleted_at' +
         ') VALUES (' +
         '  :id, :title, :content, :color, :left_pos, :top_pos, :width, :height, ' +
-        '  :always_on_top, :collapsed, :locked, :favorite, :created_at, :updated_at' +
+        '  :always_on_top, :collapsed, :locked, :favorite, :created_at, :updated_at, ' +
+        '  :guid, :rev, :device_id, :deleted, :deleted_at' +
         ') ON CONFLICT(id) DO UPDATE SET ' +
         '  title = excluded.title, ' +
         '  content = excluded.content, ' +
@@ -479,7 +526,12 @@ begin
         '  locked = excluded.locked, ' +
         '  favorite = excluded.favorite, ' +
         '  created_at = excluded.created_at, ' +
-        '  updated_at = excluded.updated_at';
+        '  updated_at = excluded.updated_at, ' +
+        '  guid = excluded.guid, ' +
+        '  rev = excluded.rev, ' +
+        '  device_id = excluded.device_id, ' +
+        '  deleted = excluded.deleted, ' +
+        '  deleted_at = excluded.deleted_at';
 
       Query.ParamByName('id').AsLargeInt := ANote.ID;
       Query.ParamByName('title').AsString := ANote.Title;
@@ -495,6 +547,14 @@ begin
       Query.ParamByName('favorite').AsInteger := Ord(ANote.Favorite);
       Query.ParamByName('created_at').AsString := DateTimeToStoredISO8601(ANote.CreatedAt);
       Query.ParamByName('updated_at').AsString := DateTimeToStoredISO8601(ANote.UpdatedAt);
+      Query.ParamByName('guid').AsString := ANote.Guid;
+      Query.ParamByName('rev').AsLargeInt := ANote.Rev;
+      Query.ParamByName('device_id').AsString := ANote.DeviceId;
+      Query.ParamByName('deleted').AsInteger := Ord(ANote.Deleted);
+      if ANote.DeletedAt <> 0 then
+        Query.ParamByName('deleted_at').AsString := DateTimeToStoredISO8601(ANote.DeletedAt)
+      else
+        Query.ParamByName('deleted_at').AsString := '';
 
       Query.ExecSQL;
 

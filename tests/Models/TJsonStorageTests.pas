@@ -5,7 +5,7 @@ interface
 uses
   System.SysUtils, System.Classes, System.IOUtils, System.Generics.Collections,
   System.SyncObjs, System.JSON,
-  DUnitX.TestFramework, uJsonStorage, uNote, uEnums, uILogger;
+  DUnitX.TestFramework, uJsonStorage, uNote, uEnums, uILogger, uStorage;
 
 type
   [TestFixture]
@@ -48,6 +48,10 @@ type
     procedure TestLoadV3NoteWithoutFavoriteDefaultsFalse;
     [Test]
     procedure TestLoadMalformedFavoriteDegradesGracefully;
+    [Test]
+    procedure TestSyncIdentityRoundTripsOnSaveLoad;
+    [Test]
+    procedure TestLegacyV3NoteDefaultsSyncIdentity;
   end;
 
 implementation
@@ -376,8 +380,8 @@ begin
         Pair := (Json as TJSONObject).Get('schemaVersion');
         Assert.IsNotNull(Pair, 'Saved JSON must contain schemaVersion');
         Assert.IsTrue(Pair.JsonValue is TJSONNumber, 'schemaVersion must be a JSON number');
-Assert.AreEqual<Int64>(3, (Pair.JsonValue as TJSONNumber).AsInt64,
-'schemaVersion must equal the current schema version (3)');
+Assert.AreEqual<Int64>(NoteSchemaVersion, (Pair.JsonValue as TJSONNumber).AsInt64,
+'schemaVersion must equal the current schema version');
       finally
         Json.Free;
       end;
@@ -929,6 +933,84 @@ begin
       Assert.IsTrue(AllDefault, 'Wrong-typed favorite degrades to False');
     finally
       LoadedNotes.Free;
+    end;
+  finally
+    Storage.Free;
+    if TDirectory.Exists(TempDir) then
+      TDirectory.Delete(TempDir, True);
+  end;
+end;
+
+procedure TJsonStorageTestFixture.TestSyncIdentityRoundTripsOnSaveLoad;
+var
+  Storage: TJsonStorage;
+  TempDir: string;
+  Note, Loaded: TNote;
+  LoadedList: TObjectList<TNote>;
+begin
+  TempDir := TPath.Combine(TPath.GetTempPath,
+    'StickyNotes_JsonIdent_' + IntToStr(TThread.GetTickCount));
+  Storage := TJsonStorage.Create(TempDir);
+  try
+    Storage.Initialize;
+    Note := TNote.Create(1, 'Ident', 'Body', ncYellow);
+    try
+      Note.Guid := '11111111-2222-3333-4444-555555555555';
+      Note.Rev := 7;
+      Assert.IsTrue(Storage.SaveNote(Note), 'save should succeed');
+    finally
+      Note.Free;
+    end;
+
+    LoadedList := Storage.LoadAllNotes;
+    try
+      Assert.AreEqual<Integer>(1, LoadedList.Count);
+      Loaded := LoadedList[0];
+      Assert.AreEqual<string>('11111111-2222-3333-4444-555555555555', Loaded.Guid);
+      Assert.AreEqual<Int64>(7, Loaded.Rev);
+      Assert.IsTrue(Loaded.DeviceId <> '', 'DeviceId must be stamped on save');
+      Assert.IsFalse(Loaded.Deleted);
+    finally
+      LoadedList.Free;
+    end;
+  finally
+    Storage.Free;
+    if TDirectory.Exists(TempDir) then
+      TDirectory.Delete(TempDir, True);
+  end;
+end;
+
+procedure TJsonStorageTestFixture.TestLegacyV3NoteDefaultsSyncIdentity;
+var
+  Storage: TJsonStorage;
+  TempDir, NotesPath, FileName: string;
+  LoadedList: TObjectList<TNote>;
+  Json: string;
+begin
+  TempDir := TPath.Combine(TPath.GetTempPath,
+    'StickyNotes_JsonIdentLegacy_' + IntToStr(TThread.GetTickCount));
+  NotesPath := TPath.Combine(TempDir, 'notes');
+  ForceDirectories(NotesPath);
+  FileName := TPath.Combine(NotesPath, '0000000009.json');
+  Json :=
+    '{"schemaVersion":3,"ID":9,"Title":"Legacy","Content":"No identity","Color":0,' +
+    '"Left":10,"Top":20,"Width":300,"Height":200,"AlwaysOnTop":false,' +
+    '"Collapsed":false,"Locked":false,"Favorite":false,' +
+    '"CreatedAt":"2026-09-17T14:33:25.400+05:30","UpdatedAt":"2026-09-17T14:33:25.400+05:30",' +
+    '"tags":[],"checklistItems":[]}';
+  TFile.WriteAllText(FileName, Json, TEncoding.UTF8);
+
+  Storage := TJsonStorage.Create(TempDir);
+  try
+    Storage.Initialize;
+    LoadedList := Storage.LoadAllNotes;
+    try
+      Assert.AreEqual<Integer>(1, LoadedList.Count, 'a v3 note must still load');
+      Assert.AreEqual<string>('', LoadedList[0].Guid, 'absent guid defaults to empty');
+      Assert.AreEqual<Int64>(1, LoadedList[0].Rev, 'absent rev defaults to 1');
+      Assert.IsFalse(LoadedList[0].Deleted, 'absent deleted defaults to False');
+    finally
+      LoadedList.Free;
     end;
   finally
     Storage.Free;

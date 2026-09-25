@@ -5,7 +5,7 @@ interface
 uses
   System.SysUtils, System.Classes, System.Generics.Collections, System.IOUtils,
   System.JSON, System.DateUtils, System.Types,
-  uStorage, uNote, uEnums, uILogger;
+  uStorage, uNote, uEnums, uILogger, uIdentity;
 
 type
   // Raised when a JSON note file carries a schema version that this build
@@ -33,6 +33,7 @@ type
     FNotesPath: string;
     FSettingsPath: string;
     FNextID: Int64;
+    FDeviceId: string;
     function GetNoteFileName(AID: Int64): string;
     procedure EnsureDirectories;
     function NoteToJson(const ANote: TNote): TJSONObject;
@@ -137,6 +138,13 @@ begin
   Result.AddPair('Favorite', TJSONBool.Create(ANote.Favorite));
   Result.AddPair('CreatedAt', TJSONString.Create(DateTimeToStoredISO8601(ANote.CreatedAt)));
   Result.AddPair('UpdatedAt', TJSONString.Create(DateTimeToStoredISO8601(ANote.UpdatedAt)));
+  // Phase 7A sync identity (see docs/PHASE_7_CLOUD_SYNC_DESIGN.md).
+  Result.AddPair('Guid', TJSONString.Create(ANote.Guid));
+  Result.AddPair('Rev', TJSONNumber.Create(ANote.Rev));
+  Result.AddPair('DeviceId', TJSONString.Create(ANote.DeviceId));
+  Result.AddPair('Deleted', TJSONBool.Create(ANote.Deleted));
+  if ANote.DeletedAt <> 0 then
+    Result.AddPair('DeletedAt', TJSONString.Create(DateTimeToStoredISO8601(ANote.DeletedAt)));
 
   Result.AddPair('tags', TagsToJson(ANote.Tags));
   Result.AddPair('checklistItems', ChecklistItemsToJson(ANote.ChecklistItems));
@@ -415,6 +423,40 @@ begin
     else
       Note.UpdatedAt := Now;
 
+    // Phase 7A sync identity. Absent on <= v3 files -> defaults (Guid '' is
+    // generated on next save; Rev defaults to 1; Deleted defaults to False).
+    Val := AJson.GetValue('Guid');
+    if Val = nil then Val := AJson.GetValue('guid');
+    if Val is TJSONString then
+      Note.Guid := (Val as TJSONString).Value
+    else
+      Note.Guid := '';
+
+    Val := AJson.GetValue('Rev');
+    if Val = nil then Val := AJson.GetValue('rev');
+    if (Val <> nil) and (Val is TJSONNumber) then
+      Note.Rev := (Val as TJSONNumber).AsInt64
+    else
+      Note.Rev := 1;
+
+    Val := AJson.GetValue('DeviceId');
+    if Val = nil then Val := AJson.GetValue('deviceId');
+    if Val is TJSONString then
+      Note.DeviceId := (Val as TJSONString).Value
+    else
+      Note.DeviceId := '';
+
+    Val := AJson.GetValue('Deleted');
+    if Val = nil then Val := AJson.GetValue('deleted');
+    Note.Deleted := (Val <> nil) and (Val is TJSONTrue);
+
+    Val := AJson.GetValue('DeletedAt');
+    if Val = nil then Val := AJson.GetValue('deletedAt');
+    if Val is TJSONString then
+      Note.DeletedAt := StoredISO8601ToDateTime((Val as TJSONString).Value, 0)
+    else
+      Note.DeletedAt := 0;
+
     // Absent on v0/v1 files (and on any malformed v2 field) -> empty arrays,
     // same "default rather than reject" policy as every field above.
     Note.Tags := JsonToTags(AJson);
@@ -439,6 +481,15 @@ begin
   Result := False;
   TryCount := 0;
   Logger := CreateLogger;
+
+  // Phase 7A: stamp sync identity before serialising. Guid is generated once
+  // and then preserved across saves; DeviceId records the last writer.
+  if ANote.Guid = '' then
+    ANote.Guid := GenerateNoteGuid;
+  if FDeviceId = '' then
+    FDeviceId := GetOrCreateDeviceId(FBasePath);
+  ANote.DeviceId := FDeviceId;
+
   repeat
     TryCount := TryCount + 1;
     EnsureDirectories;

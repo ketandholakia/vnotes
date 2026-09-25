@@ -50,6 +50,8 @@ type
     procedure TestAssignAndClonePreservesFavorite;
     [Test]
     procedure TestIsEmptyIgnoresFavorite;
+    [Test]
+    procedure TestTouchIncrementsRev;
   end;
 
 implementation
@@ -503,6 +505,21 @@ begin
     Assert.IsTrue(Note.IsEmpty);
     Note.ToggleFavorite;
     Assert.IsTrue(Note.IsEmpty, 'Favorite alone does not make a note non-empty');
+  finally
+    Note.Free;
+  end;
+end;
+
+procedure TNoteTestFixture.TestTouchIncrementsRev;
+var
+  Note: TNote;
+begin
+  Note := TNote.Create;
+  try
+    Assert.AreEqual<Int64>(1, Note.Rev, 'a new note starts at revision 1');
+    Note.Touch;
+    Note.Touch;
+    Assert.AreEqual<Int64>(3, Note.Rev, 'each Touch increments the revision');
   finally
     Note.Free;
   end;

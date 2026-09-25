@@ -11,8 +11,9 @@ const
   //   - JSON writes it per note as `schemaVersion`
   //   - SQLite records it once per database as `PRAGMA user_version`
   // v0 = unversioned legacy; v1 = schemaVersion field; v2 = tags +
-  // checklist; v3 = favorite (current).
-  NoteSchemaVersion = 3;
+  // checklist; v3 = favorite; v4 = sync identity (guid, rev, deviceId,
+  // deleted, deletedAt) - current.
+  NoteSchemaVersion = 4;
 
 type
   INoteStorage = interface

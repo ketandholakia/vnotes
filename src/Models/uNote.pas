@@ -35,6 +35,12 @@ type
     FUpdatedAt: TDateTime;
     FTags: TArray<string>;
     FChecklistItems: TArray<TChecklistItem>;
+    // Phase 7A: sync identity + lifecycle metadata.
+    FGuid: string;
+    FRev: Int64;
+    FDeviceId: string;
+    FDeleted: Boolean;
+    FDeletedAt: TDateTime;
     function GetColorAsTColor: TColor;
     procedure SetColorAsTColor(const Value: TColor);
     function GetTags: TArray<string>;
@@ -66,6 +72,17 @@ type
     property UpdatedAt: TDateTime read FUpdatedAt write FUpdatedAt;
     property Tags: TArray<string> read GetTags write SetTags;
     property ChecklistItems: TArray<TChecklistItem> read GetChecklistItems write SetChecklistItems;
+    // Phase 7A: sync identity (see docs/PHASE_7_CLOUD_SYNC_DESIGN.md).
+    //   Guid     - global identity; assigned by storage on first save if empty
+    //   Rev      - revision of this note record; increments on every Touch
+    //              (i.e. mirrors UpdatedAt)
+    //   DeviceId - last writer; stamped by storage on save
+    //   Deleted/DeletedAt - tombstone (set only by future sync logic)
+    property Guid: string read FGuid write FGuid;
+    property Rev: Int64 read FRev write FRev;
+    property DeviceId: string read FDeviceId write FDeviceId;
+    property Deleted: Boolean read FDeleted write FDeleted;
+    property DeletedAt: TDateTime read FDeletedAt write FDeletedAt;
     function IsEmpty: Boolean;
     function GetBounds: TRect;
     procedure SetBounds(const ALeft, ATop, AWidth, AHeight: Integer);
@@ -122,6 +139,11 @@ begin
   FUpdatedAt := Now;
   FTags := nil;
   FChecklistItems := nil;
+  FGuid := '';
+  FRev := 1;
+  FDeviceId := '';
+  FDeleted := False;
+  FDeletedAt := 0;
 end;
 
 constructor TNote.Create(AID: Int64; const ATitle, AContent: string; AColor: TNoteColor);
@@ -155,6 +177,11 @@ begin
   // would silently mutate Source's array too without this.
   FTags := System.Copy(Source.FTags);
   FChecklistItems := System.Copy(Source.FChecklistItems);
+  FGuid := Source.FGuid;
+  FRev := Source.FRev;
+  FDeviceId := Source.FDeviceId;
+  FDeleted := Source.FDeleted;
+  FDeletedAt := Source.FDeletedAt;
 end;
 
 function TNote.Clone: TNote;
@@ -198,6 +225,7 @@ end;
 procedure TNote.Touch;
 begin
   FUpdatedAt := Now;
+  Inc(FRev); // Phase 7A: revision of the note record, mirrors UpdatedAt
 end;
 
 function TNote.GetTags: TArray<string>;

@@ -54,6 +54,8 @@ type
     procedure TestOlderSchemaVersionIsUpgraded;
     [Test]
     procedure TestNewerSchemaVersionIsRejected;
+    [Test]
+    procedure TestSchemaUpgradeV3ToV4AddsSyncColumns;
   end;
 
 implementation
@@ -850,6 +852,67 @@ begin
       end,
       EInvalidOperation,
       'a database from a newer build must be refused, not silently opened');
+  finally
+    Storage.Free;
+    if TDirectory.Exists(TempDir) then
+      TDirectory.Delete(TempDir, True);
+  end;
+end;
+
+procedure TSQLiteStorageTestFixture.TestSchemaUpgradeV3ToV4AddsSyncColumns;
+var
+  Storage: TSQLiteStorage;
+  TempDir, DbFile: string;
+  Conn: TFDConnection;
+  Note, Loaded: TNote;
+  LoadedList: TObjectList<TNote>;
+begin
+  TempDir := TPath.Combine(TPath.GetTempPath,
+    'StickyNotes_SQLiteTest_V4_' + IntToStr(TThread.GetTickCount));
+  ForceDirectories(TempDir);
+  DbFile := TPath.Combine(TempDir, 'vnotes.db');
+
+  // A v3 database: old notes table with no sync-identity columns.
+  Conn := TFDConnection.Create(nil);
+  try
+    Conn.DriverName := 'SQLite';
+    Conn.Params.Values['Database'] := DbFile;
+    Conn.Params.Values['OpenMode'] := 'ReadWriteCreate';
+    Conn.Open;
+    Conn.ExecSQL(
+      'CREATE TABLE notes (id INTEGER PRIMARY KEY, title TEXT, content TEXT, color INTEGER, ' +
+      'left_pos INTEGER, top_pos INTEGER, width INTEGER, height INTEGER, always_on_top INTEGER, ' +
+      'collapsed INTEGER, locked INTEGER, favorite INTEGER, created_at TEXT, updated_at TEXT);');
+    Conn.ExecSQL('PRAGMA user_version = 3;');
+    Conn.Close;
+  finally
+    Conn.Free;
+  end;
+
+  Storage := TSQLiteStorage.Create(TempDir);
+  try
+    Storage.Initialize;
+    Assert.AreEqual<Integer>(NoteSchemaVersion, Storage.GetSchemaVersion,
+      'a v3 database should be upgraded to the current schema version');
+
+    Note := TNote.Create(1, 'T', 'C', ncYellow);
+    try
+      Note.Guid := 'abc-guid';
+      Note.Rev := 5;
+      Assert.IsTrue(Storage.SaveNote(Note), 'save into the upgraded database should succeed');
+    finally
+      Note.Free;
+    end;
+
+    LoadedList := Storage.LoadAllNotes;
+    try
+      Assert.AreEqual<Integer>(1, LoadedList.Count);
+      Loaded := LoadedList[0];
+      Assert.AreEqual<string>('abc-guid', Loaded.Guid);
+      Assert.AreEqual<Int64>(5, Loaded.Rev);
+    finally
+      LoadedList.Free;
+    end;
   finally
     Storage.Free;
     if TDirectory.Exists(TempDir) then
