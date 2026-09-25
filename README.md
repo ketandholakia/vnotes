@@ -133,6 +133,22 @@ type
 
 Register it in `TStorageResolver.ResolveStorage` (`src/Storage/uStorageResolver.pas`) - no UI changes needed.
 
+## Documentation
+
+User guides live in **[docs/help/](docs/help/README.md)**:
+
+- [Getting started](docs/help/getting-started.md) - first run, the tray icon, basic workflow
+- [Working with notes](docs/help/notes.md) - header buttons, colours, pin, lock, collapse, tags
+- [Keyboard shortcuts](docs/help/keyboard-shortcuts.md) - global, note-window and Notes-List keys
+- [Notes List & search](docs/help/notes-list-and-search.md) - finding, filtering and arranging notes
+- [Settings](docs/help/settings.md) - every option, tab by tab
+- [Backup & restore](docs/help/backup-and-restore.md) - manual and automatic backups
+- [Sync](docs/help/sync.md) - folder/WebDAV setup, conflict handling, security notes
+- [Troubleshooting](docs/help/troubleshooting.md) - hotkeys, the log, isolated test profile, FAQ
+
+Developer/architecture docs are in [docs/](docs/): architecture, development plan, and the
+cloud-sync and encryption design analyses.
+
 ## Roadmap
 
 | Phase | Features |
