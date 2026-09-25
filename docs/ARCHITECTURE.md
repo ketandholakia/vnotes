@@ -1,5 +1,10 @@
 # VNotes Architecture
 
+> **Document status.** This file mixes a *living* architecture reference with
+> *dated* phase analyses. Sections titled `Phase …` are **historical snapshots**
+> captured at that phase; where they contradict the current code, the code (and
+> the living sections above) wins. Known supersessions are called out inline.
+
 ## Application Layer
 
 ```
@@ -12,11 +17,10 @@ StickyNotes.dpr (entry point)
         │     ├── THotkeyService (global hotkeys)
         │     ├── TThemeService (light/dark themes)
         │     ├── TBackupService (ZIP backup/restore)
-        │     └── INoteStorage → TJsonStorage (persistence)
+        │     └── INoteStorage → TStorageResolver → (TJsonStorage | TSQLiteStorage)
         │
         ├── TNoteEditorContext (implements INoteEditorContext)
-        ├── FNoteForms: TList<TNoteForm> (UI tracking)
-        └── FTrayController (dead code, documented)
+        └── FNoteForms: TList<TNoteForm> (UI tracking)
 ```
 
 ## Note Form Dependency Boundary
@@ -67,7 +71,6 @@ Defined in `src\Application\uNoteEditorContext.pas`.
 | INoteStorage (interface) | TNoteApplication | TNoteApplication.Create | auto (interface ref) |
 | TNoteEditorContext (INoteEditorContext) | TTrayForm (per-note-form) | TTrayForm.CreateNoteForm | auto (interface ref) |
 | TList\<TNoteForm\> | TTrayForm | TTrayForm.FormCreate | TTrayForm.FormDestroy |
-| TTrayController (unused) | TTrayForm | TTrayForm.FormCreate | TTrayForm.FormDestroy |
 | TNoteForm | TTrayForm (Owner) | CreateNoteForm | VCL close |
 | TTrayForm | VCL Application | .dpr CreateForm | VCL runtime |
 
@@ -90,8 +93,7 @@ src\
 │   └── uNoteEditorContext.pas    (INoteEditorContext + TNoteEditorContext adapter)
 ├── Controllers\
 │   ├── uNoteManager.pas          (TNoteManager — note CRUD orchestration)
-│   ├── uSettingsController.pas   (TSettingsController — settings INI lifecycle)
-│   └── uTrayController.pas       (TTrayController — unused, preserved as dead code)
+│   └── uSettingsController.pas   (TSettingsController — settings INI lifecycle)
 ├── Forms\
 │   ├── uTrayForm.pas/.dfm        (TTrayForm — thin UI tray form)
 │   ├── uNoteForm.pas/.dfm        (TNoteForm — note editor window)
@@ -108,9 +110,10 @@ src\
 │   ├── uStartupService.pas       (TStartupService — Run-key autostart)
 │   └── uThemeService.pas         (TThemeService — color palettes, VCL styles)
 ├── Storage\
-│   ├── uStorage.pas              (INoteStorage interface + TStorageFactory)
+│   ├── uStorage.pas              (INoteStorage interface)
 │   ├── uJsonStorage.pas          (TJsonStorage — JSON file-per-note)
-│   └── uSQLiteStorage.pas        (stub only, not functional)
+│   ├── uSQLiteStorage.pas        (TSQLiteStorage — SQLite backend, FireDAC)
+│   └── uStorageResolver.pas      (TStorageResolver — backend selection)
 └── Utils\
     ├── uColorUtils.pas, uIso8601.pas, uJsonUtils.pas
     ├── uMonitorUtils.pas, uWindowUtils.pas
@@ -216,9 +219,9 @@ Restore:
 |--------|-----------|
 | **Abstraction quality** | Good — clean 6-method interface. No JSON-specific concepts leaked. |
 | **Storage-independent?** | YES — all methods use domain types (TNote, Int64, TObjectList\<TNote\>) |
-| **Factory** | TStorageFactory supports 'JSON' and 'SQLITE' strings, defaulting to JSON |
-| **SQLite stub** | TSQLiteStorage exists but all methods return stub/empty results |
-| **Missing capability** | No batch operations, no transaction support, no search/query interface |
+| **Resolver** | `TStorageResolver.ResolveStorage` selects the backend from `Storage\Backend`: `JSON` (default) or `SQLite`; an unrecognised value raises (fail fast) |
+| **SQLite backend** | `TSQLiteStorage` is a functional FireDAC implementation (notes + tags + checklist), not a stub |
+| **Missing capability** | No batch operations and no search/query interface on `INoteStorage`; search is provided separately by `INoteQuery` (`uNoteQuery.pas`) |
 | **Future-proof?** | YES — interface is minimal and correct. TNoteManager never touches storage internals. |
 
 ### JSON Storage Analysis
@@ -364,6 +367,14 @@ No additional abstraction layers are needed. `INoteStorage` is sufficient.
 ## Phase 3C — SQLite Readiness & Migration Design Analysis
 
 This section is the Phase 3C analysis. **It is a design document, not an implementation.**
+
+> **⚠️ Superseded (2026-09-25).** Everything below in this section is the Phase 3C
+> snapshot and no longer matches the code. Since then: SQLite was fully implemented
+> and activated as production storage (Phase 6M); `TStorageResolver.ResolveStorage`
+> now selects the backend from `Storage\Backend` (JSON default, SQLite opt-in); the
+> dead `TStorageFactory` was removed; note search was implemented (Phase 4B,
+> `INoteQuery`); and the `4neem` transcript artefacts mentioned below were purged
+> from the repository and its history. Treat the claims below as historical only.
 
 ### Current Persistence Architecture (verified from source)
 
@@ -705,5 +716,4 @@ Cross-note atomicity: NO — each note save is individually atomic. No transacti
 ## Known Limitations
 
 - Full manual application smoke testing in a Delphi IDE environment remains unverified.
-- `TTrayController` is dead code (preserved, documented).
 - `TNoteApplication.Initialize` uses `TStyleManager.TrySetStyle` which cannot be tested in a DUnitX console environment (hangs). The `TestApplicationInitializeShutdown` test was replaced with `TestApplicationShutdownIsSafe` for this reason.

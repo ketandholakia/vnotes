@@ -61,3 +61,14 @@ settings.ini.testbak
 # Leaked AI session exports - never commit
 *_4neem.*
 *_4neem*
+
+# OpenClaw / agent workspace files at the repo root (not part of the product)
+.agents/
+.openclaw/
+.openclaw-attachments/
+AGENTS.md
+HEARTBEAT.md
+IDENTITY.md
+SOUL.md
+TOOLS.md
+USER.md
