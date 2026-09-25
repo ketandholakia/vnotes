@@ -102,7 +102,8 @@ const
   ICON_LOCK_ON   = #$E72E;
   ICON_COLLAPSE  = #$E738;
   ICON_EXPAND    = #$E73F;
-  ICON_PIN       = #$E718;
+  ICON_PIN_OFF   = #$E77A;
+  ICON_PIN_ON    = #$E718;
   ICON_COLOR     = #$E2B1;
   ICON_FAV_OFF   = #$E113;
   ICON_FAV_ON    = #$E734;
@@ -219,7 +220,8 @@ begin
                   else                         Result := ICON_LOCK_OFF;
     nhbCollapse:  if FButtonChecked[ABtn] then Result := ICON_EXPAND
                   else                         Result := ICON_COLLAPSE;
-    nhbPin:       Result := ICON_PIN;
+    nhbPin:       if FButtonChecked[ABtn] then Result := ICON_PIN_ON
+                  else                         Result := ICON_PIN_OFF;
     nhbColor:     Result := ICON_COLOR;
     nhbFavorite:  if FButtonChecked[ABtn] then Result := ICON_FAV_ON
                   else                         Result := ICON_FAV_OFF;
