@@ -21,6 +21,7 @@ type
       HotkeyStr: string;
     end;
     FOnHotkey: array[THotkeyID] of THotkeyEvent;
+    FLogger: ILogger;
     procedure WndProc(var Message: TMessage);
     function ParseHotkey(const AHotkeyStr: string; out AModifiers, AKey: UINT): Boolean;
     function GetFailedRegistrations: string;
@@ -50,6 +51,8 @@ var
 begin
   inherited Create;
   FHandle := AHandle;
+  FLogger := CreateLogger;
+  FLogger.Info(Format('HotkeyService: created with hwnd %d', [FHandle]));
   for ID := Low(THotkeyID) to High(THotkeyID) do
   begin
     FRegistered[ID] := False;
@@ -136,7 +139,7 @@ var
   Logger: ILogger;
 begin
   Result := False;
-  Logger := CreateLogger;
+  Logger := FLogger;
   
   if not ParseHotkey(AHotkeyStr, Modifiers, Key) then 
   begin
@@ -157,11 +160,14 @@ begin
     FHotkeys[AID].Event := AEvent;
     FHotkeys[AID].HotkeyStr := AHotkeyStr;
     FFailedRegistrations[AID] := False;
+    Logger.Info(Format('Hotkey registered: "%s" (ID %d, hwnd %d, mod %d, key %d)',
+      [AHotkeyStr, HotkeyID, FHandle, Modifiers, Key]));
     Result := True;
   end
   else
   begin
-    Logger.Warning(Format('Hotkey registration failed: %s (ID: %d)', [AHotkeyStr, Ord(AID)]));
+    Logger.Warning(Format('Hotkey registration failed: %s (ID: %d, hwnd %d, winerr %d)',
+      [AHotkeyStr, Ord(AID), FHandle, GetLastError]));
     FFailedRegistrations[AID] := True;
     ShowHotkeyFailures;
   end;
@@ -209,6 +215,7 @@ begin
     if (HotkeyID >= BASE_HOTKEY_ID) and (HotkeyID <= BASE_HOTKEY_ID + Ord(High(THotkeyID))) then
     begin
       ID := THotkeyID(HotkeyID - BASE_HOTKEY_ID);
+      FLogger.Info(Format('Hotkey fired: ID %d', [HotkeyID]));
       if FHotkeys[ID].Enabled and Assigned(FHotkeys[ID].Event) then
         FHotkeys[ID].Event();
       Message.Result := 0;

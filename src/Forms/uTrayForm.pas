@@ -89,6 +89,10 @@ type
     procedure OnHotkeyNewNote;
     procedure OnHotkeySearch;
     procedure CreateNoteForm(ANote: TNote);
+    // Best-effort: restore/show a form and force it to the foreground. A global
+    // hotkey must surface its window in front of whatever currently has focus,
+    // otherwise the hotkey appears to do nothing.
+    procedure BringWindowForward(AForm: TForm);
     function FindNoteForm(ANote: TNote): TNoteForm;
     procedure ShowNoteWindow(ANote: TNote);
     procedure ShowNotesList(AFocusSearch: Boolean);
@@ -622,6 +626,18 @@ begin
   Form.OnClosed := NoteFormClosed;
   FNoteForms.Add(Form);
   Form.Show;
+  BringWindowForward(Form);
+end;
+
+procedure TTrayForm.BringWindowForward(AForm: TForm);
+begin
+  if AForm = nil then Exit;
+  if IsIconic(AForm.Handle) then
+    ShowWindow(AForm.Handle, SW_RESTORE)
+  else
+    ShowWindow(AForm.Handle, SW_SHOW);
+  AForm.BringToFront;
+  SetForegroundWindow(AForm.Handle);
 end;
 
 procedure TTrayForm.OpenAllNotes;
@@ -684,10 +700,9 @@ begin
     FNotesListForm.OnOpenNote := ShowNoteWindow;
   end;
   FNotesListForm.RefreshList;
-  if not FNotesListForm.Visible then
-    FNotesListForm.Show
-  else
-    FNotesListForm.BringToFront;
+  FNotesListForm.Show; // no-op when already visible
+  // Surface it in front of the focused window (see BringWindowForward).
+  BringWindowForward(FNotesListForm);
   if AFocusSearch then
     FNotesListForm.FocusSearch;
 end;
