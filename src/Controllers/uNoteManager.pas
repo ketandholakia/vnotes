@@ -4,7 +4,8 @@ interface
 
 uses
   System.SysUtils, System.Classes, System.Generics.Collections,
-  uNote, uStorage, uEnums;
+  System.Diagnostics,
+  uNote, uStorage, uEnums, uILogger;
 
 type
   TNoteEvent = procedure(const ANote: TNote) of object;
@@ -13,6 +14,7 @@ type
   private
     FStorage: INoteStorage;
     FNotes: TObjectList<TNote>;
+    FLogger: ILogger;
     FOnNoteCreated: TNoteEvent;
     FOnNoteChanged: TNoteEvent;
     FOnNoteDeleted: TNoteEvent;
@@ -67,6 +69,7 @@ begin
   inherited Create;
   FStorage := AStorage;
   FNotes := TObjectList<TNote>.Create(True);
+  FLogger := CreateLogger;
 end;
 
 destructor TNoteManager.Destroy;
@@ -77,9 +80,19 @@ begin
 end;
 
 procedure TNoteManager.Initialize;
+var
+  Stopwatch: TStopwatch;
 begin
+  Stopwatch := TStopwatch.StartNew;
   FStorage.Initialize;
   LoadNotes;
+  Stopwatch.Stop;
+  // Lightweight startup instrumentation: records note count and load time so
+  // the storage decision gate's "500+ notes / slow load" triggers can be
+  // evaluated from real data instead of being permanently unverifiable.
+  // Emits through ILogger (OutputDebugString); no file I/O on the hot path.
+  FLogger.Info(Format('Note load: %d note(s) in %d ms',
+    [FNotes.Count, Stopwatch.ElapsedMilliseconds]));
 end;
 
 procedure TNoteManager.Finalize;
