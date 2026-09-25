@@ -16,19 +16,22 @@ A lightweight desktop sticky notes application for Windows, built with Delphi us
 - **Backup & Restore** - ZIP-based backups with scheduled automatic backups (interval configurable in Settings)
 - **Single instance** - launching a second copy signals the running app (surfaces the Notes List) and exits
 - **Multi-monitor support** - Notes are restored clamped into a visible monitor work area; corrected coordinates are persisted immediately
-- **JSON storage** - One file per note, easy to sync with Git/Dropbox/OneDrive
+- **JSON storage** - One file per note, easy to sync with Git/Dropbox/OneDrive (default)
+- **Optional SQLite backend** - Swap JSON for a single SQLite database via settings (includes tags + checklist)
 
 ## Architecture
 
 Clean separation of concerns:
 
 ```
-Forms/          # UI only (Views)
-Controllers/    # Business logic (NoteManager, TrayController, SettingsController)
+Application/    # Orchestration (NoteApplication, NoteEditorContext)
+Forms/          # UI only (views: tray, note, list, settings, about)
+Components/     # Reusable note-window widgets (header, scrollbar, color picker, checklist, tags)
+Controllers/    # Business logic (NoteManager, SettingsController)
 Models/         # Data (Note, Settings, Enums)
-Storage/        # Abstract persistence (JSON, SQLite stub)
-Services/       # Cross-cutting (Autosave, Hotkeys, Theme, Backup, Startup)
-Utils/          # Shared helpers (Window, JSON, Color, Monitor)
+Storage/        # Abstract persistence (JSON default, SQLite opt-in)
+Services/       # Cross-cutting (Autosave, Hotkeys, Theme, Backup, Startup, Migration)
+Utils/          # Shared helpers (Window, JSON, Color, Monitor, ISO-8601, Logger)
 ```
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed documentation.
@@ -69,6 +72,9 @@ build_tests.bat  REM DUnitX unit-test build -> tests\StickyNotes.Tests.exe
 
 Each note is an independent JSON file - corruption affects only one note, easy to sync.
 
+The backend is selectable via `Storage\Backend` in `settings.ini`: `JSON` (default) or `SQLite`,
+which keeps everything in a single `%APPDATA%\StickyNotes\vnotes.db`.
+
 ## Hotkeys
 
 | Action | Default | Status |
@@ -101,7 +107,7 @@ type
   end;
 ```
 
-Add to `TStorageFactory.CreateStorage` - no UI changes needed.
+Register it in `TStorageResolver.ResolveStorage` (`src/Storage/uStorageResolver.pas`) - no UI changes needed.
 
 ## Roadmap
 
