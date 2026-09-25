@@ -98,7 +98,8 @@ begin
     '  rev INTEGER,' +
     '  device_id TEXT,' +
     '  deleted INTEGER,' +
-    '  deleted_at TEXT' +
+    '  deleted_at TEXT,' +
+    '  conflict_of TEXT' +
     ');'
   );
 
@@ -230,6 +231,9 @@ begin
     AddColumnIfMissing('deleted', 'INTEGER');
     AddColumnIfMissing('deleted_at', 'TEXT');
   end;
+  // v4 -> v5 (Phase 7C) adds the conflict marker.
+  if AFromVersion < 5 then
+    AddColumnIfMissing('conflict_of', 'TEXT');
 end;
 
 procedure TSQLiteStorage.AddColumnIfMissing(const AColumn, AType: string);
@@ -380,6 +384,7 @@ begin
         Note.DeviceId := Query.FieldByName('device_id').AsString;
         Note.Deleted := Query.FieldByName('deleted').AsInteger <> 0;
         Note.DeletedAt := StoredISO8601ToDateTime(Query.FieldByName('deleted_at').AsString, 0);
+        Note.ConflictOf := Query.FieldByName('conflict_of').AsString;
         // Tolerant read: legacy rows hold offset-less local wall-clock, current
         // rows hold an explicit offset (CODE_REVIEW_2026-09-17 C1).
         Note.CreatedAt := StoredISO8601ToDateTime(Query.FieldByName('created_at').AsString, Now);
@@ -508,11 +513,11 @@ begin
         'INSERT INTO notes (' +
         '  id, title, content, color, left_pos, top_pos, width, height, ' +
         '  always_on_top, collapsed, locked, favorite, created_at, updated_at, ' +
-        '  guid, rev, device_id, deleted, deleted_at' +
+        '  guid, rev, device_id, deleted, deleted_at, conflict_of' +
         ') VALUES (' +
         '  :id, :title, :content, :color, :left_pos, :top_pos, :width, :height, ' +
         '  :always_on_top, :collapsed, :locked, :favorite, :created_at, :updated_at, ' +
-        '  :guid, :rev, :device_id, :deleted, :deleted_at' +
+        '  :guid, :rev, :device_id, :deleted, :deleted_at, :conflict_of' +
         ') ON CONFLICT(id) DO UPDATE SET ' +
         '  title = excluded.title, ' +
         '  content = excluded.content, ' +
@@ -531,7 +536,8 @@ begin
         '  rev = excluded.rev, ' +
         '  device_id = excluded.device_id, ' +
         '  deleted = excluded.deleted, ' +
-        '  deleted_at = excluded.deleted_at';
+        '  deleted_at = excluded.deleted_at, ' +
+        '  conflict_of = excluded.conflict_of';
 
       Query.ParamByName('id').AsLargeInt := ANote.ID;
       Query.ParamByName('title').AsString := ANote.Title;
@@ -555,6 +561,7 @@ begin
         Query.ParamByName('deleted_at').AsString := DateTimeToStoredISO8601(ANote.DeletedAt)
       else
         Query.ParamByName('deleted_at').AsString := '';
+      Query.ParamByName('conflict_of').AsString := ANote.ConflictOf;
 
       Query.ExecSQL;
 

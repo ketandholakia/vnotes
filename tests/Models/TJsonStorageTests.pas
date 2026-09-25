@@ -957,6 +957,7 @@ begin
     try
       Note.Guid := '11111111-2222-3333-4444-555555555555';
       Note.Rev := 7;
+      Note.ConflictOf := '99999999-0000-1111-2222-333333333333';
       Assert.IsTrue(Storage.SaveNote(Note), 'save should succeed');
     finally
       Note.Free;
@@ -970,6 +971,8 @@ begin
       Assert.AreEqual<Int64>(7, Loaded.Rev);
       Assert.IsTrue(Loaded.DeviceId <> '', 'DeviceId must be stamped on save');
       Assert.IsFalse(Loaded.Deleted);
+      Assert.AreEqual<string>('99999999-0000-1111-2222-333333333333', Loaded.ConflictOf,
+        'ConflictOf must round-trip');
     finally
       LoadedList.Free;
     end;

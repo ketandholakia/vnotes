@@ -176,6 +176,9 @@ begin
 
   Assert.AreEqual<Integer>(2, FManager.NoteCount,
     'a conflicting remote edit must be preserved as a conflict copy, not lost');
+  // Phase 7C: the copy must record which note it conflicts with.
+  Assert.AreEqual<string>(N.Guid, FManager.Notes[1].ConflictOf,
+    'the conflict copy must record the note it conflicts with');
 end;
 
 procedure TSyncEngineTestFixture.TestLocalDeletionIsPropagatedAndNotResurrected;

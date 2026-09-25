@@ -12,8 +12,8 @@ const
   //   - SQLite records it once per database as `PRAGMA user_version`
   // v0 = unversioned legacy; v1 = schemaVersion field; v2 = tags +
   // checklist; v3 = favorite; v4 = sync identity (guid, rev, deviceId,
-  // deleted, deletedAt) - current.
-  NoteSchemaVersion = 4;
+  // deleted, deletedAt); v5 = conflictOf (current).
+  NoteSchemaVersion = 5;
 
 type
   INoteStorage = interface

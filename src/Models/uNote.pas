@@ -41,6 +41,7 @@ type
     FDeviceId: string;
     FDeleted: Boolean;
     FDeletedAt: TDateTime;
+    FConflictOf: string;
     function GetColorAsTColor: TColor;
     procedure SetColorAsTColor(const Value: TColor);
     function GetTags: TArray<string>;
@@ -83,6 +84,9 @@ type
     property DeviceId: string read FDeviceId write FDeviceId;
     property Deleted: Boolean read FDeleted write FDeleted;
     property DeletedAt: TDateTime read FDeletedAt write FDeletedAt;
+    // Phase 7C: when this note is a sync conflict copy, the guid of the note
+    // it conflicts with; '' for an ordinary note.
+    property ConflictOf: string read FConflictOf write FConflictOf;
     function IsEmpty: Boolean;
     function GetBounds: TRect;
     procedure SetBounds(const ALeft, ATop, AWidth, AHeight: Integer);
@@ -144,6 +148,7 @@ begin
   FDeviceId := '';
   FDeleted := False;
   FDeletedAt := 0;
+  FConflictOf := '';
 end;
 
 constructor TNote.Create(AID: Int64; const ATitle, AContent: string; AColor: TNoteColor);
@@ -182,6 +187,7 @@ begin
   FDeviceId := Source.FDeviceId;
   FDeleted := Source.FDeleted;
   FDeletedAt := Source.FDeletedAt;
+  FConflictOf := Source.FConflictOf;
 end;
 
 function TNote.Clone: TNote;

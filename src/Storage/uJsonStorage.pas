@@ -146,6 +146,8 @@ begin
   Result.AddPair('Rev', TJSONNumber.Create(ANote.Rev));
   Result.AddPair('DeviceId', TJSONString.Create(ANote.DeviceId));
   Result.AddPair('Deleted', TJSONBool.Create(ANote.Deleted));
+  if ANote.ConflictOf <> '' then
+    Result.AddPair('ConflictOf', TJSONString.Create(ANote.ConflictOf));
   if ANote.DeletedAt <> 0 then
     Result.AddPair('DeletedAt', TJSONString.Create(DateTimeToStoredISO8601(ANote.DeletedAt)));
 
@@ -459,6 +461,13 @@ begin
       Note.DeletedAt := StoredISO8601ToDateTime((Val as TJSONString).Value, 0)
     else
       Note.DeletedAt := 0;
+
+    Val := AJson.GetValue('ConflictOf');
+    if Val = nil then Val := AJson.GetValue('conflictOf');
+    if Val is TJSONString then
+      Note.ConflictOf := (Val as TJSONString).Value
+    else
+      Note.ConflictOf := '';
 
     // Absent on v0/v1 files (and on any malformed v2 field) -> empty arrays,
     // same "default rather than reject" policy as every field above.

@@ -55,7 +55,7 @@ type
     [Test]
     procedure TestNewerSchemaVersionIsRejected;
     [Test]
-    procedure TestSchemaUpgradeV3ToV4AddsSyncColumns;
+    procedure TestSchemaUpgradeAddsSyncColumns;
   end;
 
 implementation
@@ -859,7 +859,7 @@ begin
   end;
 end;
 
-procedure TSQLiteStorageTestFixture.TestSchemaUpgradeV3ToV4AddsSyncColumns;
+procedure TSQLiteStorageTestFixture.TestSchemaUpgradeAddsSyncColumns;
 var
   Storage: TSQLiteStorage;
   TempDir, DbFile: string;
@@ -899,6 +899,7 @@ begin
     try
       Note.Guid := 'abc-guid';
       Note.Rev := 5;
+      Note.ConflictOf := 'orig-guid';
       Assert.IsTrue(Storage.SaveNote(Note), 'save into the upgraded database should succeed');
     finally
       Note.Free;
@@ -910,6 +911,7 @@ begin
       Loaded := LoadedList[0];
       Assert.AreEqual<string>('abc-guid', Loaded.Guid);
       Assert.AreEqual<Int64>(5, Loaded.Rev);
+      Assert.AreEqual<string>('orig-guid', Loaded.ConflictOf);
     finally
       LoadedList.Free;
     end;

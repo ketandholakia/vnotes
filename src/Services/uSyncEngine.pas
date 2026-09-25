@@ -370,6 +370,7 @@ begin
             CopySyncedFields(RemoteNote, ConflictNote, False);
             ConflictNote.Guid := ''; // a NEW note, not the same identity
             ConflictNote.Rev := 1;
+            ConflictNote.ConflictOf := Note.Guid; // Phase 7C: mark it resolvable
             FNoteManager.PersistNote(ConflictNote);
             FBackend.Write(Guid, PayloadOf(Note));
             Inc(Conflicts);

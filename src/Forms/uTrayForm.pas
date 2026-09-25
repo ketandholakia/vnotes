@@ -10,7 +10,7 @@ uses
   uNote, uNoteManager, uSettings, uSettingsController,
   uAutosaveService, uHotkeyService, uThemeService, uBackupService,
   uStorage, uNoteQuery, uNoteForm, uNoteApplication, uNoteEditorContext,
-  uNotesListForm, uServiceInterfaces;
+  uNotesListForm, uConflictForm, uServiceInterfaces;
 
 type
   TTrayForm = class(TForm)
@@ -32,6 +32,7 @@ type
     miExit: TMenuItem;
     // Phase 7B: created at runtime (not present in the DFM).
     miSyncNow: TMenuItem;
+    miSyncConflicts: TMenuItem;
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
     procedure miNewNoteClick(Sender: TObject);
@@ -65,6 +66,9 @@ type
     procedure OnSyncNow(Sender: TObject);
     procedure SyncProgress(const AMessage: string; AProgress: Integer);
     procedure SyncComplete(ASuccess: Boolean; const AMessage: string);
+    procedure OnSyncConflicts(Sender: TObject);
+    function CountConflicts: Integer;
+    procedure TrayMenuPopup(Sender: TObject);
     procedure BackupProgress(const AMessage: string; AProgress: Integer);
     procedure BackupComplete(ASuccess: Boolean; const AMessage: string);
     procedure RestoreComplete(ASuccess: Boolean; const AMessage: string);
@@ -151,6 +155,14 @@ begin
   miSyncNow.OnClick := OnSyncNow;
   miSyncNow.Enabled := FApplication.SyncService <> nil;
   pmTray.Items.Insert(pmTray.Items.IndexOf(N2), miSyncNow);
+
+  miSyncConflicts := TMenuItem.Create(Self);
+  miSyncConflicts.Caption := 'Sync &conflicts...';
+  miSyncConflicts.OnClick := OnSyncConflicts;
+  pmTray.Items.Insert(pmTray.Items.IndexOf(N2), miSyncConflicts);
+
+  // Refresh sync item state/caption each time the menu opens.
+  pmTray.OnPopup := TrayMenuPopup;
 
   // Open existing notes
   OpenAllNotes;
@@ -340,6 +352,56 @@ begin
   tiMain.BalloonTitle := 'V-Notes';
   tiMain.BalloonHint := AMessage;
   tiMain.ShowBalloonHint;
+end;
+
+function TTrayForm.CountConflicts: Integer;
+var
+  I: Integer;
+  N: TNote;
+begin
+  Result := 0;
+  if (FApplication = nil) or (FApplication.NoteManager = nil) then Exit;
+  for I := 0 to FApplication.NoteManager.NoteCount - 1 do
+  begin
+    N := FApplication.NoteManager.Notes[I];
+    if (N <> nil) and (N.ConflictOf <> '') then
+      Inc(Result);
+  end;
+end;
+
+procedure TTrayForm.TrayMenuPopup(Sender: TObject);
+var
+  N: Integer;
+begin
+  if miSyncNow <> nil then
+    miSyncNow.Enabled := FApplication.SyncService <> nil;
+  if miSyncConflicts <> nil then
+  begin
+    N := CountConflicts;
+    if N > 0 then
+      miSyncConflicts.Caption := Format('Sync &conflicts (%d)...', [N])
+    else
+      miSyncConflicts.Caption := 'Sync &conflicts...';
+  end;
+end;
+
+procedure TTrayForm.OnSyncConflicts(Sender: TObject);
+var
+  Dlg: TConflictForm;
+begin
+  if CountConflicts = 0 then
+  begin
+    tiMain.BalloonTitle := 'V-Notes';
+    tiMain.BalloonHint := 'No sync conflicts.';
+    tiMain.ShowBalloonHint;
+    Exit;
+  end;
+  Dlg := TConflictForm.CreateFor(Self, FApplication.NoteManager);
+  try
+    Dlg.ShowModal;
+  finally
+    Dlg.Free;
+  end;
 end;
 
 procedure TTrayForm.BackupProgress(const AMessage: string; AProgress: Integer);
