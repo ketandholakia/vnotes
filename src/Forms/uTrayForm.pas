@@ -30,6 +30,8 @@ type
     N2: TMenuItem;
     miAbout: TMenuItem;
     miExit: TMenuItem;
+    // Phase 7B: created at runtime (not present in the DFM).
+    miSyncNow: TMenuItem;
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
     procedure miNewNoteClick(Sender: TObject);
@@ -60,6 +62,9 @@ type
     procedure OnSettings(Sender: TObject);
     procedure OnBackup(Sender: TObject);
     procedure OnRestore(Sender: TObject);
+    procedure OnSyncNow(Sender: TObject);
+    procedure SyncProgress(const AMessage: string; AProgress: Integer);
+    procedure SyncComplete(ASuccess: Boolean; const AMessage: string);
     procedure BackupProgress(const AMessage: string; AProgress: Integer);
     procedure BackupComplete(ASuccess: Boolean; const AMessage: string);
     procedure RestoreComplete(ASuccess: Boolean; const AMessage: string);
@@ -137,6 +142,15 @@ begin
   tiMain.Icon := Application.Icon;
   tiMain.Hint := 'V-Notes';
   tiMain.Visible := True;
+
+  // Phase 7B: "Sync now" item, created at runtime so the DFM stays untouched.
+  // It sits just above the About/Exit separator and is enabled only when a
+  // sync folder is configured.
+  miSyncNow := TMenuItem.Create(Self);
+  miSyncNow.Caption := 'S&ync now';
+  miSyncNow.OnClick := OnSyncNow;
+  miSyncNow.Enabled := FApplication.SyncService <> nil;
+  pmTray.Items.Insert(pmTray.Items.IndexOf(N2), miSyncNow);
 
   // Open existing notes
   OpenAllNotes;
@@ -268,6 +282,11 @@ begin
         // changes to BackupEnabled / BackupIntervalDays.
         FApplication.RefreshBackupSchedule;
 
+        // Phase 7B: rebuild the sync engine from the new Sync settings.
+        FApplication.ApplySyncSettings;
+        if miSyncNow <> nil then
+          miSyncNow.Enabled := FApplication.SyncService <> nil;
+
         FApplication.SaveSettings;
         tiMain.Hint := 'Settings saved successfully';
       except
@@ -287,6 +306,40 @@ end;
 procedure TTrayForm.OnBackup(Sender: TObject);
 begin
   FApplication.BackupService.Backup;
+end;
+
+procedure TTrayForm.OnSyncNow(Sender: TObject);
+var
+  Svc: ISyncService;
+begin
+  Svc := FApplication.SyncService;
+  if Svc = nil then
+  begin
+    tiMain.BalloonTitle := 'V-Notes';
+    tiMain.BalloonHint := 'Sync is not configured. Set a sync folder in Settings.';
+    tiMain.ShowBalloonHint;
+    Exit;
+  end;
+
+  Svc.OnProgress := SyncProgress;
+  Svc.OnComplete := SyncComplete;
+  tiMain.Hint := 'Syncing...';
+  Svc.SyncNow; // the complete handler restores the hint and reports the result
+  if FNotesListForm <> nil then
+    FNotesListForm.RefreshList;
+end;
+
+procedure TTrayForm.SyncProgress(const AMessage: string; AProgress: Integer);
+begin
+  tiMain.Hint := Format('Sync: %s (%d%%)', [AMessage, AProgress]);
+end;
+
+procedure TTrayForm.SyncComplete(ASuccess: Boolean; const AMessage: string);
+begin
+  tiMain.Hint := 'V-Notes';
+  tiMain.BalloonTitle := 'V-Notes';
+  tiMain.BalloonHint := AMessage;
+  tiMain.ShowBalloonHint;
 end;
 
 procedure TTrayForm.BackupProgress(const AMessage: string; AProgress: Integer);

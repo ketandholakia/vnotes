@@ -10,6 +10,7 @@ uses
   uAutosaveService, uHotkeyService, uThemeService, uBackupService,
   uBackupScheduler, uServiceInterfaces,
   uStorage, uJsonStorage, uStorageResolver, uStorageMigrationOrchestrator,
+  uFolderSyncBackend, uSyncEngine,
   uILogger;
 
 type
@@ -24,6 +25,7 @@ type
     FBackupScheduler: IBackupScheduler;
     FStorage: INoteStorage;
     FAppDataPath: string;
+    FSyncService: ISyncService;
 
     FOnNoteCreated: TNoteEvent;
     FOnNoteChanged: TNoteEvent;
@@ -53,6 +55,9 @@ type
     // Refresh the periodic backup schedule from current settings.
     // Called by the tray form after the user OKs new settings.
     procedure RefreshBackupSchedule;
+    // Phase 7B: (re)build the sync engine from current settings. Called at
+    // construction and by the tray form after the user edits settings.
+    procedure ApplySyncSettings;
     // Request to open/close all note windows - fires OnNoteOpenRequested/OnNoteCloseRequested events
     procedure RequestOpenAllNotes;
     procedure RequestCloseAllNotes;
@@ -63,6 +68,7 @@ type
     property AutosaveService: IAutosaveService read FAutosaveService;
     property HotkeyService: IHotkeyService read FHotkeyService;
     property BackupService: IBackupService read FBackupService;
+    property SyncService: ISyncService read FSyncService;
     property BackupScheduler: IBackupScheduler read FBackupScheduler;
     property AppDataPath: string read FAppDataPath;
 
@@ -138,6 +144,9 @@ begin
 
   FNoteManager := TNoteManager.Create(FStorage);
 
+  // Phase 7B: build the sync engine when a folder backend is configured.
+  ApplySyncSettings;
+
   BackupPath := TPath.Combine(FAppDataPath, 'backups');
 
   if ABackupService = nil then
@@ -171,6 +180,7 @@ end;
 destructor TNoteApplication.Destroy;
 begin
   Shutdown;
+  FSyncService := nil;
   FBackupScheduler := nil;
   FBackupService := nil;
   FNoteManager.Free;
@@ -217,6 +227,21 @@ procedure TNoteApplication.RefreshBackupSchedule;
 begin
   if FBackupScheduler <> nil then
     FBackupScheduler.Refresh;
+end;
+
+procedure TNoteApplication.ApplySyncSettings;
+var
+  Folder: string;
+begin
+  FSyncService := nil; // drop any previously configured engine
+  if FSettingsController = nil then Exit;
+  if not FSettingsController.GetSettings.SyncEnabled then Exit;
+  Folder := Trim(FSettingsController.GetSettings.SyncFolder);
+  if Folder = '' then Exit;
+  FSyncService := TSyncEngine.Create(
+    FNoteManager,
+    TFolderSyncBackend.Create(Folder),
+    TPath.Combine(FAppDataPath, 'sync-state.json'));
 end;
 
 procedure TNoteApplication.RequestOpenAllNotes;

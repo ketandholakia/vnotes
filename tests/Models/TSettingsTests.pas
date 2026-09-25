@@ -30,6 +30,8 @@ type
     procedure TestMissingLastBackupAt;
     [Test]
     procedure TestMalformedLastBackupAt;
+    [Test]
+    procedure TestSyncSettingsRoundTrip;
   end;
 
 implementation
@@ -291,6 +293,37 @@ begin
       S.Free;
     end;
   finally
+    if TFile.Exists(TempFile) then
+      TFile.Delete(TempFile);
+  end;
+end;
+
+procedure TSettingsTestFixture.TestSyncSettingsRoundTrip;
+var
+  S, Loaded: TSettings;
+  TempFile: string;
+begin
+  TempFile := TPath.Combine(TPath.GetTempPath,
+    'StickyNotes_SettingsSync_' + IntToStr(TThread.GetTickCount) + '.ini');
+  S := TSettings.Create;
+  try
+    Assert.IsFalse(S.SyncEnabled, 'sync is off by default');
+    Assert.AreEqual<string>('', S.SyncFolder, 'no sync folder by default');
+
+    S.SyncEnabled := True;
+    S.SyncFolder := 'D:\Cloud\VNotes';
+    S.SaveToFile(TempFile);
+
+    Loaded := TSettings.Create;
+    try
+      Loaded.LoadFromFile(TempFile);
+      Assert.IsTrue(Loaded.SyncEnabled, 'SyncEnabled should round-trip');
+      Assert.AreEqual<string>('D:\Cloud\VNotes', Loaded.SyncFolder, 'SyncFolder should round-trip');
+    finally
+      Loaded.Free;
+    end;
+  finally
+    S.Free;
     if TFile.Exists(TempFile) then
       TFile.Delete(TempFile);
   end;

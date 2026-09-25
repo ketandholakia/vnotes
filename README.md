@@ -18,6 +18,7 @@ A lightweight desktop sticky notes application for Windows, built with Delphi us
 - **Multi-monitor support** - Notes are restored clamped into a visible monitor work area; corrected coordinates are persisted immediately
 - **JSON storage** - One file per note, easy to sync with Git/Dropbox/OneDrive (default)
 - **Optional SQLite backend** - Swap JSON for a single SQLite database via settings (includes tags + checklist)
+- **Folder sync** - point at a cloud-synced folder (Drive / Dropbox / OneDrive) and use the tray **Sync now** item; last-writer-wins per note by revision, with conflict copies preserved
 
 ## Architecture
 

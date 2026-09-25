@@ -67,8 +67,16 @@ type
   private
     FSettings: TSettings;
     FOriginalSettings: TSettings;
+    // Phase 7B: sync controls are created in code (see FormCreate), so the
+    // dialog's DFM needs no change.
+    FGrpSync: TGroupBox;
+    FChkSyncEnabled: TCheckBox;
+    FLblSyncFolder: TLabel;
+    FEdtSyncFolder: TEdit;
+    FBtnBrowseSync: TButton;
     procedure LoadControls;
     procedure SaveControls;
+    procedure SyncBrowseClick(Sender: TObject);
   public
     procedure LoadSettings(ASettings: TSettings);
     procedure SaveSettings(ASettings: TSettings);
@@ -81,7 +89,7 @@ var
 implementation
 
 uses
-  uEnums, uThemeService, Winapi.ShellAPI;
+  uEnums, uThemeService, Vcl.FileCtrl, Winapi.ShellAPI;
 
 {$R *.dfm}
 
@@ -108,6 +116,46 @@ begin
   udBackupRetention.Min := 0;
   udBackupRetention.Max := 365;
   udBackupRetention.Increment := 1;
+
+  // Phase 7B: sync controls, created in code and placed under the backup group
+  // on the same tab (keeps the DFM untouched).
+  tsBackup.Caption := 'Backup / Sync';
+
+  FGrpSync := TGroupBox.Create(Self);
+  FGrpSync.Parent := tsBackup;
+  FGrpSync.Left := 16;
+  FGrpSync.Top := 152;
+  FGrpSync.Width := 441;
+  FGrpSync.Height := 105;
+  FGrpSync.Caption := 'Sync Settings';
+
+  FChkSyncEnabled := TCheckBox.Create(Self);
+  FChkSyncEnabled.Parent := FGrpSync;
+  FChkSyncEnabled.Left := 12;
+  FChkSyncEnabled.Top := 24;
+  FChkSyncEnabled.Width := 400;
+  FChkSyncEnabled.Caption := 'Enable folder sync (Drive / Dropbox / OneDrive)';
+
+  FLblSyncFolder := TLabel.Create(Self);
+  FLblSyncFolder.Parent := FGrpSync;
+  FLblSyncFolder.Left := 12;
+  FLblSyncFolder.Top := 52;
+  FLblSyncFolder.Caption := 'Sync folder:';
+
+  FEdtSyncFolder := TEdit.Create(Self);
+  FEdtSyncFolder.Parent := FGrpSync;
+  FEdtSyncFolder.Left := 12;
+  FEdtSyncFolder.Top := 72;
+  FEdtSyncFolder.Width := 370;
+
+  FBtnBrowseSync := TButton.Create(Self);
+  FBtnBrowseSync.Parent := FGrpSync;
+  FBtnBrowseSync.Left := 388;
+  FBtnBrowseSync.Top := 71;
+  FBtnBrowseSync.Width := 45;
+  FBtnBrowseSync.Height := 25;
+  FBtnBrowseSync.Caption := '...';
+  FBtnBrowseSync.OnClick := SyncBrowseClick;
 
   // Phase 4C: snapshot for the Cancel rollback path. Allocated once
   // per form instance and refreshed by LoadSettings. Released in
@@ -171,6 +219,8 @@ begin
   chkBackupEnabled.Checked := FSettings.BackupEnabled;
   edtBackupInterval.Text := FSettings.BackupIntervalDays.ToString;
   edtBackupRetention.Text := FSettings.BackupRetentionDays.ToString;
+  FChkSyncEnabled.Checked := FSettings.SyncEnabled;
+  FEdtSyncFolder.Text := FSettings.SyncFolder;
 end;
 
 procedure TSettingsForm.SaveControls;
@@ -192,6 +242,17 @@ begin
   FSettings.BackupEnabled := chkBackupEnabled.Checked;
   FSettings.BackupIntervalDays := StrToIntDef(edtBackupInterval.Text, 1);
   FSettings.BackupRetentionDays := StrToIntDef(edtBackupRetention.Text, 30);
+  FSettings.SyncEnabled := FChkSyncEnabled.Checked;
+  FSettings.SyncFolder := Trim(FEdtSyncFolder.Text);
+end;
+
+procedure TSettingsForm.SyncBrowseClick(Sender: TObject);
+var
+  Dir: string;
+begin
+  Dir := FEdtSyncFolder.Text;
+  if SelectDirectory('Select the folder your cloud client syncs', '', Dir) then
+    FEdtSyncFolder.Text := Dir;
 end;
 
 procedure TSettingsForm.btnChooseFontClick(Sender: TObject);

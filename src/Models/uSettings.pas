@@ -30,6 +30,8 @@ type
     FStorageBackend: string;
     FMigrationCompleted: Boolean;
     FMigrationTimestamp: string;
+    FSyncEnabled: Boolean;
+    FSyncFolder: string;
     procedure SetDefaults;
   public
     constructor Create;
@@ -57,6 +59,9 @@ type
     property StorageBackend: string read FStorageBackend write FStorageBackend;
     property MigrationCompleted: Boolean read FMigrationCompleted write FMigrationCompleted;
     property MigrationTimestamp: string read FMigrationTimestamp write FMigrationTimestamp;
+    // Phase 7B: cloud/file sync (folder backend). Empty folder = not configured.
+    property SyncEnabled: Boolean read FSyncEnabled write FSyncEnabled;
+    property SyncFolder: string read FSyncFolder write FSyncFolder;
   end;
 
 implementation
@@ -95,6 +100,8 @@ begin
   FStorageBackend := 'JSON';
   FMigrationCompleted := False;
   FMigrationTimestamp := '';
+  FSyncEnabled := False;
+  FSyncFolder := '';
 end;
 
 procedure TSettings.LoadFromFile(const AFileName: string);
@@ -128,6 +135,9 @@ begin
     FStorageBackend := Ini.ReadString('Storage', 'Backend', FStorageBackend);
     FMigrationCompleted := Ini.ReadBool('Storage', 'MigrationCompleted', FMigrationCompleted);
     FMigrationTimestamp := Ini.ReadString('Storage', 'MigrationTimestamp', FMigrationTimestamp);
+
+    FSyncEnabled := Ini.ReadBool('Sync', 'Enabled', FSyncEnabled);
+    FSyncFolder := Ini.ReadString('Sync', 'Folder', FSyncFolder);
 
     LastBackupStr := Ini.ReadString('Backup', 'LastBackupAt', '');
     // Tolerant read: accepts the current offset-bearing format and the legacy
@@ -175,6 +185,8 @@ begin
     Ini.WriteString('Storage', 'Backend', FStorageBackend);
     Ini.WriteBool('Storage', 'MigrationCompleted', FMigrationCompleted);
     Ini.WriteString('Storage', 'MigrationTimestamp', FMigrationTimestamp);
+    Ini.WriteBool('Sync', 'Enabled', FSyncEnabled);
+    Ini.WriteString('Sync', 'Folder', FSyncFolder);
   finally
     Ini.Free;
   end;
@@ -204,6 +216,8 @@ begin
   FStorageBackend := Source.FStorageBackend;
   FMigrationCompleted := Source.FMigrationCompleted;
   FMigrationTimestamp := Source.FMigrationTimestamp;
+  FSyncEnabled := Source.FSyncEnabled;
+  FSyncFolder := Source.FSyncFolder;
 end;
 
 end.
