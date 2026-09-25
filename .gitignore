@@ -57,3 +57,7 @@ Desktop.ini
 *.db.orphan.*
 *.testbak
 settings.ini.testbak
+
+# Leaked AI session exports - never commit
+*_4neem.*
+*_4neem*
