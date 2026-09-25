@@ -88,6 +88,7 @@ type
     FChecklist:    TNoteChecklistPanel;
     FScrollBar:    TNoteScrollBar;
     FToolbarTimer: TTimer;
+    FStayOnTopTimer: TTimer;
 
     // ── Construction helpers ───────────────────────────────────────────────
     procedure CreateComponents;
@@ -99,6 +100,11 @@ type
 
     // ── Visual state ──────────────────────────────────────────────────────
     procedure ApplyColor;
+    // "Always on top" self-healing: re-asserts WS_EX_TOPMOST if something
+    // (notably the VCL's TApplication.NormalizeTopMosts, used around modal
+    // dialogs) has stripped it from a pinned note.
+    procedure EnsureTopMost;
+    procedure StayOnTopTick(Sender: TObject);
     procedure UpdateUI;
 
     // ── Header button handler ─────────────────────────────────────────────
@@ -260,6 +266,16 @@ begin
   FToolbarTimer := TTimer.Create(Self);
   FToolbarTimer.Interval := 100;
   FToolbarTimer.OnTimer := ToolbarTimerTick;
+
+  // A pinned note must actually stay above other applications. The VCL
+  // normalises topmosts on the app's owned windows (NormalizeTopMosts, called
+  // around modal dialogs), which silently clears WS_EX_TOPMOST - so the note
+  // drops behind other apps. Poll cheaply and re-assert it; skip while one of
+  // our own modal dialogs is up so the dialog stays readable.
+  FStayOnTopTimer := TTimer.Create(Self);
+  FStayOnTopTimer.Interval := 1000;
+  FStayOnTopTimer.OnTimer := StayOnTopTick;
+  FStayOnTopTimer.Enabled := True;
 end;
 
 procedure TNoteForm.WireEvents;
@@ -656,6 +672,21 @@ begin
   if Assigned(FOnClosed) then
     FOnClosed(Self);
   Action := caFree;
+end;
+
+procedure TNoteForm.EnsureTopMost;
+begin
+  if (FNote = nil) or (not FIsLoaded) then Exit;
+  if not FNote.AlwaysOnTop then Exit;
+  if Application.ModalLevel <> 0 then Exit; // yield to our own dialogs
+  if HandleAllocated and ((GetWindowLong(Handle, GWL_EXSTYLE) and WS_EX_TOPMOST) = 0) then
+    SetWindowPos(Handle, HWND_TOPMOST, 0, 0, 0, 0,
+      SWP_NOMOVE or SWP_NOSIZE or SWP_NOACTIVATE);
+end;
+
+procedure TNoteForm.StayOnTopTick(Sender: TObject);
+begin
+  EnsureTopMost;
 end;
 
 procedure TNoteForm.FormDestroy(Sender: TObject);
