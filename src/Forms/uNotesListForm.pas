@@ -215,7 +215,7 @@ begin
       else
         ColorName := 'Notes';
       end;
-      CellText := Format('📁 %s - %d Notes', [ColorName, Sender.ChildCount[Node]]);
+      CellText := Format(#$D83D#$DCC1' %s - %d Notes', [ColorName, Sender.ChildCount[Node]]);
     end
     else
       CellText := '';
@@ -226,7 +226,7 @@ begin
   if not Assigned(Note) then Exit;
   
   case Column of
-    0: CellText := ' 📌';
+    0: CellText := ' '#$D83D#$DCCC;
     1: 
       if Note.Title = '' then
         CellText := '(untitled)'
@@ -235,9 +235,9 @@ begin
     2: CellText := FormatDateTime('dd mmm yyyy', Note.UpdatedAt);
     3: 
       if Note.ChecklistTotalCount > 0 then
-        CellText := '✅ Checklist'
+        CellText := #$2705' Checklist'
       else
-        CellText := '📝 Memo';
+        CellText := #$D83D#$DCDD' Memo';
     4:
       if Length(Note.Tags) > 0 then
         CellText := '[' + String.Join(', ', Note.Tags) + ']'
@@ -246,14 +246,16 @@ begin
     5:
       begin
         case Note.Color of
-          ncYellow: Emoji := '🟨';
-          ncGreen:  Emoji := '🟩';
-          ncBlue:   Emoji := '🟦';
-          ncPink:   Emoji := '🟪'; // pink/purple block
-          ncPurple: Emoji := '🟪';
-          ncOrange: Emoji := '🟧';
-          ncGray:   Emoji := '⬛';
-          ncWhite:  Emoji := '⬜';
+          // Icons are written as #$ escapes, NOT raw emoji: this unit is UTF-8
+          // without a BOM and dcc32 reads non-ASCII source bytes as ANSI (mojibake).
+          ncYellow: Emoji := #$D83D#$DFE8;
+          ncGreen:  Emoji := #$D83D#$DFE9;
+          ncBlue:   Emoji := #$D83D#$DFE6;
+          ncPink:   Emoji := #$D83D#$DFEA; // pink/purple block
+          ncPurple: Emoji := #$D83D#$DFEA;
+          ncOrange: Emoji := #$D83D#$DFE7;
+          ncGray:   Emoji := #$2B1B;
+          ncWhite:  Emoji := #$2B1C;
         else
           Emoji := '';
         end;
