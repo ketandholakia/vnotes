@@ -1,10 +1,11 @@
 unit uSyncScheduler;
 
 {
-  Phase 7D: scheduled (interval) sync - mirrors TBackupScheduler.
+  Phase 7D/7E: scheduled (interval) sync - mirrors TBackupScheduler.
 
-  A single timer owns periodic sync. The scheduler is the only component that
-  arms it, and an internal FIsBusy flag prevents overlapping runs.
+  A single timer owns periodic sync. Runs are executed through a TSyncRunner so
+  the I/O happens off the UI thread; the busy state is the runner's, which also
+  prevents overlapping runs.
 
   Behaviour:
    - Start:   arms the timer with the current SyncIntervalMinutes (no-op if
@@ -13,25 +14,23 @@ unit uSyncScheduler;
    - Refresh: re-reads settings and re-arms (or stops).
    - TickNow: forces an immediate tick (tests / manual triggers).
 
-  Note: SyncNow runs synchronously on the main thread. For the folder backend
-  that is a fast filesystem pass; a future networked backend should move the
-  work off the UI thread.
+  LastSyncAt records when the most recent run was started.
 }
 
 interface
 
 uses
   System.SysUtils, System.Classes, Vcl.ExtCtrls,
-  uSettings, uILogger, uServiceInterfaces;
+  uSettings, uILogger, uServiceInterfaces, uSyncRunner;
 
 type
   TSyncScheduler = class(TInterfacedObject, ISyncScheduler)
   private
     FSyncService: ISyncService;
+    FRunner: TSyncRunner;
     FSettings: TSettings;
     FTimer: TTimer;
     FIntervalMinutes: Integer;
-    FIsBusy: Boolean;
     FIsRunning: Boolean;
     FLastSyncAt: TDateTime;
     FLogger: ILogger;
@@ -43,12 +42,15 @@ type
     function GetLastSyncAt: TDateTime;
     function GetIntervalMinutes: Integer;
   public
-    constructor Create(const ASyncService: ISyncService; ASettings: TSettings);
+    constructor Create(const ASyncService: ISyncService; const ARunner: TSyncRunner;
+      ASettings: TSettings);
     destructor Destroy; override;
     procedure Start;
     procedure Stop;
     procedure Refresh;
     procedure TickNow;
+    // Blocks until the current run (if any) has finished. For tests/diagnostics.
+    procedure WaitForIdle;
     property IsRunning: Boolean read GetIsRunning;
     property IsBusy: Boolean read GetIsBusy;
     property LastSyncAt: TDateTime read GetLastSyncAt;
@@ -63,14 +65,15 @@ const
 
 { TSyncScheduler }
 
-constructor TSyncScheduler.Create(const ASyncService: ISyncService; ASettings: TSettings);
+constructor TSyncScheduler.Create(const ASyncService: ISyncService;
+  const ARunner: TSyncRunner; ASettings: TSettings);
 begin
   inherited Create;
   FSyncService := ASyncService;
+  FRunner := ARunner;
   FSettings := ASettings;
   FLogger := CreateLogger;
   FIntervalMinutes := 0;
-  FIsBusy := False;
   FIsRunning := False;
   FLastSyncAt := 0;
   FTimer := TTimer.Create(nil);
@@ -108,29 +111,23 @@ begin
 end;
 
 procedure TSyncScheduler.OnTimer(Sender: TObject);
-var
-  Success: Boolean;
 begin
-  if FIsBusy then Exit;
-  if not Assigned(FSyncService) then Exit;
   if (FSettings = nil) or (not FSettings.SyncEnabled) then
   begin
     Stop; // settings were turned off between ticks
     Exit;
   end;
-
-  FIsBusy := True;
-  try
-    Success := FSyncService.SyncNow;
-    if Success then
-      FLastSyncAt := Now;
-  finally
-    FIsBusy := False;
+  if FRunner <> nil then
+  begin
+    if FRunner.IsRunning then Exit; // never overlap
+    FLastSyncAt := Now;
+    FRunner.Start;
+  end
+  else if FSyncService <> nil then
+  begin
+    FLastSyncAt := Now;
+    FSyncService.SyncNow;
   end;
-
-  // Re-arm with the current interval (in case it changed since Start).
-  ApplyInterval;
-  FTimer.Enabled := True;
 end;
 
 procedure TSyncScheduler.Start;
@@ -174,9 +171,24 @@ end;
 
 procedure TSyncScheduler.TickNow;
 begin
-  if FIsBusy then Exit;
   if (FSettings = nil) or (not FSettings.SyncEnabled) then Exit;
-  OnTimer(nil);
+  if FRunner <> nil then
+  begin
+    if FRunner.IsRunning then Exit;
+    FLastSyncAt := Now;
+    FRunner.Start;
+  end
+  else if FSyncService <> nil then
+  begin
+    FLastSyncAt := Now;
+    FSyncService.SyncNow;
+  end;
+end;
+
+procedure TSyncScheduler.WaitForIdle;
+begin
+  if FRunner <> nil then
+    FRunner.WaitForIdle;
 end;
 
 function TSyncScheduler.GetIsRunning: Boolean;
@@ -186,7 +198,7 @@ end;
 
 function TSyncScheduler.GetIsBusy: Boolean;
 begin
-  Result := FIsBusy;
+  Result := (FRunner <> nil) and FRunner.IsRunning;
 end;
 
 function TSyncScheduler.GetLastSyncAt: TDateTime;

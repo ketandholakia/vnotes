@@ -10,7 +10,7 @@ uses
   uAutosaveService, uHotkeyService, uThemeService, uBackupService,
   uBackupScheduler, uServiceInterfaces,
   uStorage, uJsonStorage, uStorageResolver, uStorageMigrationOrchestrator,
-  uFolderSyncBackend, uSyncEngine, uSyncScheduler, uWebDavBackend, uCredentialStore,
+  uFolderSyncBackend, uSyncEngine, uSyncScheduler, uSyncRunner, uWebDavBackend, uCredentialStore,
   uILogger;
 
 type
@@ -27,6 +27,7 @@ type
     FAppDataPath: string;
     FSyncService: ISyncService;
     FSyncScheduler: ISyncScheduler;
+    FSyncRunner: TSyncRunner;
     FCredentialStore: ICredentialStore;
 
     FOnNoteCreated: TNoteEvent;
@@ -74,6 +75,7 @@ type
     property BackupService: IBackupService read FBackupService;
     property SyncService: ISyncService read FSyncService;
     property SyncScheduler: ISyncScheduler read FSyncScheduler;
+    property SyncRunner: TSyncRunner read FSyncRunner;
     property BackupScheduler: IBackupScheduler read FBackupScheduler;
     property AppDataPath: string read FAppDataPath;
 
@@ -189,6 +191,7 @@ destructor TNoteApplication.Destroy;
 begin
   Shutdown;
   FSyncScheduler := nil;
+  FreeAndNil(FSyncRunner);
   FSyncService := nil;
   FBackupScheduler := nil;
   FBackupService := nil;
@@ -250,6 +253,7 @@ var
 begin
   FSyncScheduler := nil; // drop any previously configured scheduler
   FSyncService := nil;   // ... and its engine
+  FreeAndNil(FSyncRunner);
   if FSettingsController = nil then Exit;
   if not FSettingsController.GetSettings.SyncEnabled then Exit;
 
@@ -275,8 +279,10 @@ begin
       TPath.Combine(FAppDataPath, 'sync-state.json'));
   end;
 
-  // The scheduler is armed later by Initialize / RefreshSyncSchedule.
-  FSyncScheduler := TSyncScheduler.Create(FSyncService, FSettingsController.GetSettings);
+  // Runs happen off the UI thread; the scheduler is armed later by
+  // Initialize / RefreshSyncSchedule.
+  FSyncRunner := TSyncRunner.Create(FSyncService);
+  FSyncScheduler := TSyncScheduler.Create(FSyncService, FSyncRunner, FSettingsController.GetSettings);
 end;
 
 procedure TNoteApplication.RefreshSyncSchedule;

@@ -39,6 +39,7 @@ type
     function GetOnComplete: TSyncComplete;
     procedure SetOnComplete(const Value: TSyncComplete);
     procedure Report(const AMessage: string; AProgress: Integer);
+    procedure NotifyComplete(const ASuccess: Boolean; const AMessage: string);
     procedure LoadState;
     procedure SaveState;
     function ContentSignature(const ANote: TNote): string;
@@ -59,7 +60,7 @@ implementation
 
 uses
   System.JSON, System.Classes, System.IOUtils,
-  uJsonStorage, uILogger;
+  uJsonStorage, uILogger, uMainThread;
 
 { TSyncEngine }
 
@@ -103,8 +104,23 @@ end;
 
 procedure TSyncEngine.Report(const AMessage: string; AProgress: Integer);
 begin
-  if Assigned(FOnProgress) then
-    FOnProgress(AMessage, AProgress);
+  if not Assigned(FOnProgress) then Exit;
+  // Marshalled: the callback may touch the UI.
+  TMainInvoker.Run(
+    procedure
+    begin
+      FOnProgress(AMessage, AProgress);
+    end);
+end;
+
+procedure TSyncEngine.NotifyComplete(const ASuccess: Boolean; const AMessage: string);
+begin
+  if not Assigned(FOnComplete) then Exit;
+  TMainInvoker.Run(
+    procedure
+    begin
+      FOnComplete(ASuccess, AMessage);
+    end);
 end;
 
 procedure TSyncEngine.LoadState;
@@ -270,8 +286,7 @@ begin
   Logger := CreateLogger;
   if FBackend = nil then
   begin
-    if Assigned(FOnComplete) then
-      FOnComplete(False, 'Sync is not configured');
+    NotifyComplete(False, 'Sync is not configured');
     Exit;
   end;
 
@@ -283,19 +298,27 @@ begin
   LocalOrder := TObjectList<TNote>.Create(False); // references only
   LocalByGuid := TDictionary<string, TNote>.Create;
   try
-    // Ensure every local note has a guid, then index it.
-    for I := 0 to FNoteManager.NoteCount - 1 do
-    begin
-      Note := FNoteManager.Notes[I];
-      if Note = nil then Continue;
-      if Note.Guid = '' then
-        FNoteManager.PersistNote(Note); // storage stamps a guid
-      if Note.Guid <> '' then
+    // Build a local snapshot on the main thread (the note model is UI-thread
+    // owned); the rest of the reconcile then works from the snapshot.
+    TMainInvoker.Run(
+      procedure
+      var
+        Idx: Integer;
+        N: TNote;
       begin
-        LocalOrder.Add(Note);
-        LocalByGuid.AddOrSetValue(Note.Guid, Note);
-      end;
-    end;
+        for Idx := 0 to FNoteManager.NoteCount - 1 do
+        begin
+          N := FNoteManager.Notes[Idx];
+          if N = nil then Continue;
+          if N.Guid = '' then
+            FNoteManager.PersistNote(N); // storage stamps a guid
+          if N.Guid <> '' then
+          begin
+            LocalOrder.Add(N);
+            LocalByGuid.AddOrSetValue(N.Guid, N);
+          end;
+        end;
+      end);
 
     RemoteNames := FBackend.ListNames;
     RemoteSet := TDictionary<string, Boolean>.Create;
@@ -344,11 +367,15 @@ begin
           begin
             // New remote note -> materialise locally with a fresh local ID,
             // returning a Created window (consistent with the app's model).
-            Note := FNoteManager.CreateNote(RemoteNote.Title, RemoteNote.Content,
-              RemoteNote.Color, RemoteNote.Left, RemoteNote.Top, RemoteNote.Width,
-              RemoteNote.Height, RemoteNote.AlwaysOnTop);
-            CopySyncedFields(RemoteNote, Note, False);
-            FNoteManager.PersistNote(Note);
+            TMainInvoker.Run(
+              procedure
+              begin
+                Note := FNoteManager.CreateNote(RemoteNote.Title, RemoteNote.Content,
+                  RemoteNote.Color, RemoteNote.Left, RemoteNote.Top, RemoteNote.Width,
+                  RemoteNote.Height, RemoteNote.AlwaysOnTop);
+                CopySyncedFields(RemoteNote, Note, False);
+                FNoteManager.PersistNote(Note);
+              end);
             LocalByGuid.AddOrSetValue(Guid, Note);
             Inc(Pulled);
             Continue;
@@ -358,8 +385,12 @@ begin
           LocalRev := Note.Rev;
           if RemoteRev > LocalRev then
           begin
-            CopySyncedFields(RemoteNote, Note, True); // keep local geometry
-            FNoteManager.PersistNote(Note);
+            TMainInvoker.Run(
+              procedure
+              begin
+                CopySyncedFields(RemoteNote, Note, True); // keep local geometry
+                FNoteManager.PersistNote(Note);
+              end);
             Inc(Pulled);
           end
           else if RemoteRev < LocalRev then
@@ -378,15 +409,19 @@ begin
           begin
             // Equal revision, diverged content: keep local, never lose the
             // remote edit - preserve it as a visible conflict copy.
-            ConflictNote := FNoteManager.CreateNote(
-              Note.Title + ' (conflict from ' + Copy(RemoteNote.DeviceId, 1, 8) + ')',
-              RemoteNote.Content, RemoteNote.Color, Note.Left + 30, Note.Top + 30,
-              Note.Width, Note.Height, False);
-            CopySyncedFields(RemoteNote, ConflictNote, False);
-            ConflictNote.Guid := ''; // a NEW note, not the same identity
-            ConflictNote.Rev := 1;
-            ConflictNote.ConflictOf := Note.Guid; // Phase 7C: mark it resolvable
-            FNoteManager.PersistNote(ConflictNote);
+            TMainInvoker.Run(
+              procedure
+              begin
+                ConflictNote := FNoteManager.CreateNote(
+                  Note.Title + ' (conflict from ' + Copy(RemoteNote.DeviceId, 1, 8) + ')',
+                  RemoteNote.Content, RemoteNote.Color, Note.Left + 30, Note.Top + 30,
+                  Note.Width, Note.Height, False);
+                CopySyncedFields(RemoteNote, ConflictNote, False);
+                ConflictNote.Guid := ''; // a NEW note, not the same identity
+                ConflictNote.Rev := 1;
+                ConflictNote.ConflictOf := Note.Guid; // Phase 7C: mark it resolvable
+                FNoteManager.PersistNote(ConflictNote);
+              end);
             if UseETags then
               FBackend.WriteIfMatch(Guid, PayloadOf(Note), RemoteETag)
             else
@@ -424,7 +459,7 @@ begin
       Logger.Info(Format('Sync: pushed %d, pulled %d, conflicts %d, removed %d',
         [Pushed, Pulled, Conflicts, Removed]));
       if Assigned(FOnComplete) then
-        FOnComplete(True, Format('Sync complete: %d pushed, %d pulled, %d conflicts, %d removed',
+        NotifyComplete(True, Format('Sync complete: %d pushed, %d pulled, %d conflicts, %d removed',
           [Pushed, Pulled, Conflicts, Removed]));
     finally
       RemoteSet.Free;
@@ -433,8 +468,7 @@ begin
     on E: Exception do
     begin
       Logger.Error('Sync failed: ' + E.Message);
-      if Assigned(FOnComplete) then
-        FOnComplete(False, 'Sync failed: ' + E.Message);
+      NotifyComplete(False, 'Sync failed: ' + E.Message);
       Result := False;
     end;
   end;

@@ -5,7 +5,7 @@ interface
 uses
   System.SysUtils, System.Classes,
   DUnitX.TestFramework,
-  uSettings, uServiceInterfaces, uSyncScheduler;
+  uSettings, uServiceInterfaces, uSyncRunner, uSyncScheduler;
 
 type
   // Minimal ISyncService stub that counts SyncNow invocations.
@@ -36,11 +36,13 @@ type
     [Test]
     procedure TestStartArmsWhenEnabled;
     [Test]
-    procedure TestTickNowInvokesSyncAndStampsLastSync;
+    procedure TestTickNowRunsSyncOffThread;
     [Test]
     procedure TestTickNowDoesNothingWhenDisabled;
     [Test]
     procedure TestRefreshStopsWhenDisabled;
+    [Test]
+    procedure TestRunnerRunsSyncOffThread;
   end;
 
 implementation
@@ -84,17 +86,20 @@ procedure TSyncSchedulerTestFixture.TestStartDoesNothingWhenDisabled;
 var
   S: TSettings;
   Stub: TStubSyncService;
+  Runner: TSyncRunner;
   Sch: TSyncScheduler;
 begin
   S := TSettings.Create;
   Stub := TStubSyncService.Create;
-  Sch := TSyncScheduler.Create(Stub, S);
+  Runner := TSyncRunner.Create(Stub);
+  Sch := TSyncScheduler.Create(Stub, Runner, S);
   try
     S.SyncEnabled := False;
     Sch.Start;
     Assert.IsFalse(Sch.IsRunning, 'scheduler must not arm when sync is disabled');
   finally
-    Sch.Free; // releases + frees Stub
+    Sch.Free;
+    Runner.Free; // releases the last reference to Stub
     S.Free;
   end;
 end;
@@ -103,11 +108,13 @@ procedure TSyncSchedulerTestFixture.TestStartArmsWhenEnabled;
 var
   S: TSettings;
   Stub: TStubSyncService;
+  Runner: TSyncRunner;
   Sch: TSyncScheduler;
 begin
   S := TSettings.Create;
   Stub := TStubSyncService.Create;
-  Sch := TSyncScheduler.Create(Stub, S);
+  Runner := TSyncRunner.Create(Stub);
+  Sch := TSyncScheduler.Create(Stub, Runner, S);
   try
     S.SyncEnabled := True;
     S.SyncIntervalMinutes := 5;
@@ -116,29 +123,33 @@ begin
     Assert.AreEqual<Integer>(5, Sch.IntervalMinutes);
   finally
     Sch.Free;
+    Runner.Free;
     S.Free;
   end;
 end;
 
-procedure TSyncSchedulerTestFixture.TestTickNowInvokesSyncAndStampsLastSync;
+procedure TSyncSchedulerTestFixture.TestTickNowRunsSyncOffThread;
 var
   S: TSettings;
   Stub: TStubSyncService;
+  Runner: TSyncRunner;
   Sch: TSyncScheduler;
 begin
   S := TSettings.Create;
   Stub := TStubSyncService.Create;
-  Sch := TSyncScheduler.Create(Stub, S);
+  Runner := TSyncRunner.Create(Stub);
+  Sch := TSyncScheduler.Create(Stub, Runner, S);
   try
     S.SyncEnabled := True;
     Stub.NextResult := True;
     Sch.Start;
     Sch.TickNow;
+    Assert.IsTrue(Sch.LastSyncAt > 0, 'a tick should record when the run started');
+    Sch.WaitForIdle; // let the worker finish
     Assert.AreEqual<Integer>(1, Stub.SyncCount, 'TickNow must run exactly one sync');
-    Assert.IsTrue(Sch.LastSyncAt > 0, 'a successful sync must stamp LastSyncAt');
-    Assert.IsFalse(Sch.IsBusy, 'the busy guard must be cleared after a tick');
   finally
     Sch.Free;
+    Runner.Free;
     S.Free;
   end;
 end;
@@ -147,17 +158,21 @@ procedure TSyncSchedulerTestFixture.TestTickNowDoesNothingWhenDisabled;
 var
   S: TSettings;
   Stub: TStubSyncService;
+  Runner: TSyncRunner;
   Sch: TSyncScheduler;
 begin
   S := TSettings.Create;
   Stub := TStubSyncService.Create;
-  Sch := TSyncScheduler.Create(Stub, S);
+  Runner := TSyncRunner.Create(Stub);
+  Sch := TSyncScheduler.Create(Stub, Runner, S);
   try
     S.SyncEnabled := False;
     Sch.TickNow;
+    Sch.WaitForIdle;
     Assert.AreEqual<Integer>(0, Stub.SyncCount, 'a disabled scheduler must not sync');
   finally
     Sch.Free;
+    Runner.Free;
     S.Free;
   end;
 end;
@@ -166,11 +181,13 @@ procedure TSyncSchedulerTestFixture.TestRefreshStopsWhenDisabled;
 var
   S: TSettings;
   Stub: TStubSyncService;
+  Runner: TSyncRunner;
   Sch: TSyncScheduler;
 begin
   S := TSettings.Create;
   Stub := TStubSyncService.Create;
-  Sch := TSyncScheduler.Create(Stub, S);
+  Runner := TSyncRunner.Create(Stub);
+  Sch := TSyncScheduler.Create(Stub, Runner, S);
   try
     S.SyncEnabled := True;
     Sch.Start;
@@ -180,7 +197,26 @@ begin
     Assert.IsFalse(Sch.IsRunning, 'disabling sync must stop the schedule');
   finally
     Sch.Free;
+    Runner.Free;
     S.Free;
+  end;
+end;
+
+procedure TSyncSchedulerTestFixture.TestRunnerRunsSyncOffThread;
+var
+  Stub: TStubSyncService;
+  Runner: TSyncRunner;
+begin
+  Stub := TStubSyncService.Create;
+  Runner := TSyncRunner.Create(Stub);
+  try
+    Stub.NextResult := True;
+    Assert.IsFalse(Runner.IsRunning, 'a fresh runner is idle');
+    Runner.Start;
+    Runner.WaitForIdle;
+    Assert.AreEqual<Integer>(1, Stub.SyncCount, 'the runner must invoke SyncNow once');
+  finally
+    Runner.Free; // releases the only reference to Stub
   end;
 end;
 

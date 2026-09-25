@@ -64,6 +64,7 @@ type
     procedure OnBackup(Sender: TObject);
     procedure OnRestore(Sender: TObject);
     procedure OnSyncNow(Sender: TObject);
+    procedure WireSyncCallbacks;
     procedure SyncProgress(const AMessage: string; AProgress: Integer);
     procedure SyncComplete(ASuccess: Boolean; const AMessage: string);
     procedure OnSyncConflicts(Sender: TObject);
@@ -135,6 +136,9 @@ begin
   FApplication.BackupService.OnAfterStorageSwap := BackupAfterStorageSwap;
   // Initialize (loads settings, storage, notes)
   FApplication.Initialize;
+
+  // Wire UI feedback for both manual and scheduled syncs.
+  WireSyncCallbacks;
 
   // In-memory search (Phase 4B)
   FNoteQuery := TNoteQuery.Create;
@@ -298,6 +302,8 @@ begin
         FApplication.ApplySyncSettings;
         // Phase 7D: re-arm periodic sync with the new interval.
         FApplication.RefreshSyncSchedule;
+        // Phase 7E: the engine was rebuilt, so re-wire its UI callbacks.
+        WireSyncCallbacks;
         if miSyncNow <> nil then
           miSyncNow.Enabled := FApplication.SyncService <> nil;
 
@@ -322,6 +328,15 @@ begin
   FApplication.BackupService.Backup;
 end;
 
+procedure TTrayForm.WireSyncCallbacks;
+begin
+  if FApplication.SyncService <> nil then
+  begin
+    FApplication.SyncService.OnProgress := SyncProgress;
+    FApplication.SyncService.OnComplete := SyncComplete;
+  end;
+end;
+
 procedure TTrayForm.OnSyncNow(Sender: TObject);
 var
   Svc: ISyncService;
@@ -330,17 +345,19 @@ begin
   if Svc = nil then
   begin
     tiMain.BalloonTitle := 'V-Notes';
-    tiMain.BalloonHint := 'Sync is not configured. Set a sync folder in Settings.';
+    tiMain.BalloonHint := 'Sync is not configured. Set a sync backend in Settings.';
     tiMain.ShowBalloonHint;
     Exit;
   end;
 
-  Svc.OnProgress := SyncProgress;
-  Svc.OnComplete := SyncComplete;
+  WireSyncCallbacks;
   tiMain.Hint := 'Syncing...';
-  Svc.SyncNow; // the complete handler restores the hint and reports the result
-  if FNotesListForm <> nil then
-    FNotesListForm.RefreshList;
+  // Run off the UI thread; the completion handler restores the hint, reports
+  // the result and refreshes the notes list (all marshalled back to the UI).
+  if FApplication.SyncRunner <> nil then
+    FApplication.SyncRunner.Start
+  else
+    Svc.SyncNow;
 end;
 
 procedure TTrayForm.SyncProgress(const AMessage: string; AProgress: Integer);
@@ -354,6 +371,9 @@ begin
   tiMain.BalloonTitle := 'V-Notes';
   tiMain.BalloonHint := AMessage;
   tiMain.ShowBalloonHint;
+  // Pulled notes and conflict copies only exist once the run finished.
+  if FNotesListForm <> nil then
+    FNotesListForm.RefreshList;
 end;
 
 function TTrayForm.CountConflicts: Integer;
