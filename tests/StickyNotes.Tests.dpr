@@ -24,7 +24,8 @@ uses
   uStorageMigrationOrchestrator in '..\src\Services\uStorageMigrationOrchestrator.pas',
   TPhase6MActivationTests in 'Models\TPhase6MActivationTests.pas',
   uIso8601 in '..\src\Utils\uIso8601.pas',
-  TNoteTimestampTests in 'Models\TNoteTimestampTests.pas';
+  TNoteTimestampTests in 'Models\TNoteTimestampTests.pas',
+  TStorageResolverTests in 'Models\TStorageResolverTests.pas';
 
 var
   runner: ITestRunner;

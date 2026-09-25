@@ -17,26 +17,6 @@ type
     procedure Finalize;
   end;
 
-  TStorageFactory = class
-  public
-    class function CreateStorage(const AStorageType: string; const ABasePath: string): INoteStorage;
-  end;
-
 implementation
-
-uses
-  uJsonStorage, uSQLiteStorage;
-
-{ TStorageFactory }
-
-class function TStorageFactory.CreateStorage(const AStorageType: string; const ABasePath: string): INoteStorage;
-begin
-  if SameText(AStorageType, 'JSON') then
-    Result := TJsonStorage.Create(ABasePath)
-  else if SameText(AStorageType, 'SQLITE') then
-    Result := TSQLiteStorage.Create(ABasePath)
-  else
-    Result := TJsonStorage.Create(ABasePath); // Default to JSON
-end;
 
 end.
