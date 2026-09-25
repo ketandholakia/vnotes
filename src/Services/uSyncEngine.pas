@@ -258,7 +258,8 @@ var
   LocalOrder: TObjectList<TNote>;
   RemoteNames: TArray<string>;
   RemoteSet: TDictionary<string, Boolean>;
-  Guid, Payload: string;
+  Guid, Payload, RemoteETag: string;
+  UseETags: Boolean;
   Note, RemoteNote, ConflictNote: TNote;
   LocalRev, RemoteRev: Int64;
   Pushed, Pulled, Conflicts, Removed: Integer;
@@ -275,6 +276,7 @@ begin
   end;
 
   Pushed := 0; Pulled := 0; Conflicts := 0; Removed := 0;
+  UseETags := FBackend.SupportsETags;
   LoadState;
   Report('Scanning local notes...', 10);
 
@@ -317,7 +319,13 @@ begin
       Report('Pulling remote changes...', 40);
       for Guid in RemoteNames do
       begin
-        Payload := FBackend.Read(Guid);
+        if UseETags then
+          Payload := FBackend.ReadWithETag(Guid, RemoteETag)
+        else
+        begin
+          Payload := FBackend.Read(Guid);
+          RemoteETag := '';
+        end;
         if Payload = '' then Continue;
         RemoteNote := TryParse(Payload);
         if RemoteNote = nil then Continue; // never act on unreadable remote data
@@ -356,8 +364,15 @@ begin
           end
           else if RemoteRev < LocalRev then
           begin
-            FBackend.Write(Guid, PayloadOf(Note));
-            Inc(Pushed);
+            if (not UseETags) or FBackend.WriteIfMatch(Guid, PayloadOf(Note), RemoteETag) then
+              Inc(Pushed)
+            else
+            begin
+              // The object changed underneath us between read and write; make
+              // no destructive move - the next run re-reads and reconciles.
+              Inc(Conflicts);
+              Logger.Warning('Sync: remote ' + Guid + ' changed during sync; deferring to next run');
+            end;
           end
           else if ContentSignature(Note) <> ContentSignature(RemoteNote) then
           begin
@@ -372,7 +387,10 @@ begin
             ConflictNote.Rev := 1;
             ConflictNote.ConflictOf := Note.Guid; // Phase 7C: mark it resolvable
             FNoteManager.PersistNote(ConflictNote);
-            FBackend.Write(Guid, PayloadOf(Note));
+            if UseETags then
+              FBackend.WriteIfMatch(Guid, PayloadOf(Note), RemoteETag)
+            else
+              FBackend.Write(Guid, PayloadOf(Note));
             Inc(Conflicts);
           end;
         finally
@@ -384,8 +402,15 @@ begin
       for Note in LocalOrder do
       begin
         if RemoteSet.ContainsKey(Note.Guid) then Continue; // already handled above
-        FBackend.Write(Note.Guid, PayloadOf(Note));
-        Inc(Pushed);
+        // A new object: require it to still be absent (If-None-Match: *) so we
+        // never clobber one created remotely mid-sync.
+        if (not UseETags) or FBackend.WriteIfMatch(Note.Guid, PayloadOf(Note), '') then
+          Inc(Pushed)
+        else
+        begin
+          Inc(Conflicts);
+          Logger.Warning('Sync: ' + Note.Guid + ' appeared remotely during sync; deferring to next run');
+        end;
       end;
 
       // Record the new synced baseline (only guids still present locally).

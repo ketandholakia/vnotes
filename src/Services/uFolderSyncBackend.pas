@@ -20,6 +20,10 @@ type
     FRoot: string;
     FNotesPath: string;
     function PathFor(const AName: string): string;
+    // Phase 7E: an ETag derived from the file's mtime and size. The folder
+    // backend therefore supports optimistic concurrency too, which both makes
+    // the engine path uniform and keeps it unit-testable without a server.
+    function CurrentETag(const APath: string): string;
   public
     constructor Create(const ARootPath: string);
     function DisplayName: string;
@@ -27,6 +31,9 @@ type
     function Read(const AName: string): string;
     procedure Write(const AName, AContent: string);
     procedure Remove(const AName: string);
+    function SupportsETags: Boolean;
+    function ReadWithETag(const AName: string; out AETag: string): string;
+    function WriteIfMatch(const AName, AContent, AExpectedETag: string): Boolean;
   end;
 
 implementation
@@ -104,6 +111,48 @@ begin
   Path := PathFor(AName);
   if TFile.Exists(Path) then
     TFile.Delete(Path);
+end;
+
+function TFolderSyncBackend.CurrentETag(const APath: string): string;
+begin
+  if not TFile.Exists(APath) then
+    Exit('');
+  try
+    Result := Format('%s:%d',
+      [FormatDateTime('yyyymmddhhnnsszzz', TFile.GetLastWriteTime(APath)),
+       TFile.GetSize(APath)]);
+  except
+    Result := '';
+  end;
+end;
+
+function TFolderSyncBackend.SupportsETags: Boolean;
+begin
+  Result := True;
+end;
+
+function TFolderSyncBackend.ReadWithETag(const AName: string; out AETag: string): string;
+var
+  Path: string;
+begin
+  Path := PathFor(AName);
+  AETag := CurrentETag(Path);
+  if AETag = '' then
+    Result := ''
+  else
+    Result := TFile.ReadAllText(Path, TEncoding.UTF8);
+end;
+
+function TFolderSyncBackend.WriteIfMatch(const AName, AContent, AExpectedETag: string): Boolean;
+var
+  Path, Current: string;
+begin
+  Path := PathFor(AName);
+  Current := CurrentETag(Path);
+  if Current <> AExpectedETag then
+    Exit(False); // precondition failed - someone else changed it
+  Write(AName, AContent);
+  Result := True;
 end;
 
 end.

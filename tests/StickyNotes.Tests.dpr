@@ -28,7 +28,8 @@ uses
   TStorageResolverTests in 'Models\TStorageResolverTests.pas',
   TLoggerTests in 'Models\TLoggerTests.pas',
   TSyncEngineTests in 'Models\TSyncEngineTests.pas',
-  TSyncSchedulerTests in 'Models\TSyncSchedulerTests.pas';
+  TSyncSchedulerTests in 'Models\TSyncSchedulerTests.pas',
+  TSyncBackendTests in 'Models\TSyncBackendTests.pas';
 
 var
   runner: ITestRunner;

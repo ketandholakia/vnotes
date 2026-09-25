@@ -126,6 +126,18 @@ type
     function Read(const AName: string): string;
     procedure Write(const AName, AContent: string);
     procedure Remove(const AName: string);
+
+    // Phase 7E: optional optimistic-concurrency (ETag) support. When True, the
+    // sync engine uses ReadWithETag / WriteIfMatch to detect a remote that
+    // changed underneath it, instead of blindly overwriting.
+    function SupportsETags: Boolean;
+    // Reads content and the current entity tag ('' when the object is absent).
+    function ReadWithETag(const AName: string; out AETag: string): string;
+    // Writes only when the current tag matches AExpectedETag. An empty
+    // AExpectedETag means "the object must not already exist" (If-None-Match: *).
+    // Returns False when the precondition fails (a concurrent modification);
+    // the object is left untouched.
+    function WriteIfMatch(const AName, AContent, AExpectedETag: string): Boolean;
   end;
 
   ISyncService = interface
