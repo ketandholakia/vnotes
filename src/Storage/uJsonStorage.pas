@@ -36,16 +36,14 @@ type
     FDeviceId: string;
     function GetNoteFileName(AID: Int64): string;
     procedure EnsureDirectories;
-    function NoteToJson(const ANote: TNote): TJSONObject;
-    function JsonToNote(const AJson: TJSONObject): TNote;
-    function TagsToJson(const ATags: TArray<string>): TJSONArray;
-    function ChecklistItemsToJson(const AItems: TArray<TChecklistItem>): TJSONArray;
+    class function TagsToJson(const ATags: TArray<string>): TJSONArray;
+    class function ChecklistItemsToJson(const AItems: TArray<TChecklistItem>): TJSONArray;
     // Both readers are defensive by design: an absent field (v0/v1 files),
     // a wrong-typed field, or a malformed element is treated as "no data"
     // for that field/element rather than raising  a damaged tags/checklist
     // block should never make an otherwise-valid note unloadable.
-    function JsonToTags(const AJson: TJSONObject): TArray<string>;
-    function JsonToChecklistItems(const AJson: TJSONObject): TArray<TChecklistItem>;
+    class function JsonToTags(const AJson: TJSONObject): TArray<string>;
+    class function JsonToChecklistItems(const AJson: TJSONObject): TArray<TChecklistItem>;
   public
     constructor Create(const ABasePath: string);
     destructor Destroy; override;
@@ -55,6 +53,11 @@ type
     function GetNextID: Int64;
     procedure Initialize;
     procedure Finalize;
+
+    // Canonical note<->JSON codec, shared with the sync layer so the local
+    // storage format and the sync interchange format cannot drift apart.
+    class function NoteToJson(const ANote: TNote): TJSONObject;
+    class function JsonToNote(const AJson: TJSONObject): TNote;
   end;
 
 implementation
@@ -120,7 +123,7 @@ begin
   Inc(FNextID);
 end;
 
-function TJsonStorage.NoteToJson(const ANote: TNote): TJSONObject;
+class function TJsonStorage.NoteToJson(const ANote: TNote): TJSONObject;
 begin
   Result := TJSONObject.Create;
   Result.AddPair(SCHEMA_VERSION_FIELD, TJSONNumber.Create(CURRENT_SCHEMA_VERSION));
@@ -150,7 +153,7 @@ begin
   Result.AddPair('checklistItems', ChecklistItemsToJson(ANote.ChecklistItems));
 end;
 
-function TJsonStorage.TagsToJson(const ATags: TArray<string>): TJSONArray;
+class function TJsonStorage.TagsToJson(const ATags: TArray<string>): TJSONArray;
 var
   Tag: string;
 begin
@@ -159,7 +162,7 @@ begin
     Result.Add(Tag);
 end;
 
-function TJsonStorage.ChecklistItemsToJson(const AItems: TArray<TChecklistItem>): TJSONArray;
+class function TJsonStorage.ChecklistItemsToJson(const AItems: TArray<TChecklistItem>): TJSONArray;
 var
   Item: TChecklistItem;
   ItemJson: TJSONObject;
@@ -174,7 +177,7 @@ begin
   end;
 end;
 
-function TJsonStorage.JsonToTags(const AJson: TJSONObject): TArray<string>;
+class function TJsonStorage.JsonToTags(const AJson: TJSONObject): TArray<string>;
 var
   Val: TJSONValue;
   Arr: TJSONArray;
@@ -202,7 +205,7 @@ begin
   Result := List;
 end;
 
-function TJsonStorage.JsonToChecklistItems(const AJson: TJSONObject): TArray<TChecklistItem>;
+class function TJsonStorage.JsonToChecklistItems(const AJson: TJSONObject): TArray<TChecklistItem>;
 var
   Val, TextVal, DoneVal: TJSONValue;
   Arr: TJSONArray;
@@ -242,7 +245,7 @@ begin
   Result := List;
 end;
 
-function TJsonStorage.JsonToNote(const AJson: TJSONObject): TNote;
+class function TJsonStorage.JsonToNote(const AJson: TJSONObject): TNote;
 var
   Note: TNote;
   ColorInt: Integer;
