@@ -10,7 +10,7 @@ uses
 type
   TBackupService = class(TInterfacedObject, IBackupService)
   private
-    FNoteManager: TNoteManager;
+    FNoteManager: INoteManager;
     FSettings: TSettings;
     FBackupPath: string;
     FOnProgress: TBackupProgress;
@@ -34,7 +34,7 @@ type
     function GetOnAfterStorageSwap: TStorageSwapEvent;
     procedure SetOnAfterStorageSwap(const Value: TStorageSwapEvent);
   public
-    constructor Create(ANoteManager: TNoteManager; ASettings: TSettings; const ABackupPath: string; const AAppDataPath: string = '');
+    constructor Create(ANoteManager: INoteManager; ASettings: TSettings; const ABackupPath: string; const AAppDataPath: string = '');
     destructor Destroy; override;
     function Backup: Boolean; virtual;
     procedure Restore(const ABackupFile: string);
@@ -120,7 +120,7 @@ end;
 
 { TBackupService }
 
-constructor TBackupService.Create(ANoteManager: TNoteManager; ASettings: TSettings; const ABackupPath: string; const AAppDataPath: string = '');
+constructor TBackupService.Create(ANoteManager: INoteManager; ASettings: TSettings; const ABackupPath: string; const AAppDataPath: string = '');
 begin
   inherited Create;
   FNoteManager := ANoteManager;

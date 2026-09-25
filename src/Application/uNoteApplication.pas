@@ -33,6 +33,7 @@ type
 
     function GetAppDataPath: string;
     function GetSettings: TSettings;
+    function GetNoteManager: INoteManager;
     procedure LoadSettings;
   public
     procedure SaveSettings;
@@ -56,7 +57,7 @@ type
     procedure RequestOpenAllNotes;
     procedure RequestCloseAllNotes;
 
-    property NoteManager: TNoteManager read FNoteManager;
+    property NoteManager: INoteManager read GetNoteManager;
     property Settings: TSettings read GetSettings;
     property ThemeService: IThemeService read FThemeService;
     property AutosaveService: IAutosaveService read FAutosaveService;
@@ -246,6 +247,11 @@ end;
 function TNoteApplication.GetSettings: TSettings;
 begin
   Result := FSettingsController.GetSettings;
+end;
+
+function TNoteApplication.GetNoteManager: INoteManager;
+begin
+  Result := FNoteManager;
 end;
 
 procedure TNoteApplication.LoadSettings;

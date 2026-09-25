@@ -52,7 +52,7 @@ type
     procedure vstNotesInitNode(Sender: TBaseVirtualTree; ParentNode, Node: PVirtualNode; var InitialStates: TVirtualNodeInitStates);
     procedure btnOpenClick(Sender: TObject);
   private
-    FNoteManager: TNoteManager;
+    FNoteManager: INoteManager;
     FQuery: INoteQuery;
     FResults: TObjectList<TNote>;  // OwnsObjects = False - references only
     FOnOpenNote: TOpenNoteEvent;
@@ -61,7 +61,7 @@ type
     function SelectedNote: TNote;
     procedure OpenSelected;
   public
-    constructor CreateFor(AOwner: TComponent; ANoteManager: TNoteManager;
+    constructor CreateFor(AOwner: TComponent; ANoteManager: INoteManager;
       const AQuery: INoteQuery);
     // Re-runs the current search against the note manager's notes.
     // Public so TTrayForm can resync the (open) list on note create/delete.
@@ -81,7 +81,7 @@ implementation
 { TNotesListForm }
 
 constructor TNotesListForm.CreateFor(AOwner: TComponent;
-  ANoteManager: TNoteManager; const AQuery: INoteQuery);
+  ANoteManager: INoteManager; const AQuery: INoteQuery);
 begin
   // inherited Create loads the dfm and fires FormCreate; the manager/query
   // fields are assigned afterwards, before RefreshList is ever called.

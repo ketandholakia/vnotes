@@ -55,6 +55,10 @@ type
     procedure TestSaveNoteRefusesNoteNotOwnedByManager;
     [Test]
     procedure TestDeleteNoteLeavesNoStorageFile;
+    [Test]
+    procedure TestManagerImplementsINoteManager;
+    [Test]
+    procedure TestInterfaceReferenceDoesNotOwnManager;
   end;
 
 implementation
@@ -253,6 +257,31 @@ begin
   Assert.AreEqual(0, Integer(Length(TDirectory.GetFiles(
     TPath.Combine(FTempDir, 'notes'), '*.json'))),
     'Deleted note must not remain in storage');
+end;
+
+procedure TNoteManagerTestFixture.TestManagerImplementsINoteManager;
+var
+  Ref: INoteManager;
+begin
+  Ref := FManager;
+  Assert.IsNotNull(Ref, 'TNoteManager must be assignable to INoteManager');
+  Assert.AreEqual<Integer>(0, Ref.NoteCount);
+end;
+
+procedure TNoteManagerTestFixture.TestInterfaceReferenceDoesNotOwnManager;
+var
+  Ref: INoteManager;
+begin
+  Ref := FManager;
+  Ref.CreateNote('t', 'c', ncYellow, 10, 20, 300, 200, False);
+  Assert.AreEqual<Integer>(1, FManager.NoteCount,
+    'creating via the interface must affect the owned instance');
+
+  Ref := nil; // releasing the interface reference must NOT free the manager
+  Assert.IsNotNull(FManager,
+    'the manager must survive interface release (lifetime is owned explicitly)');
+  Assert.AreEqual<Integer>(1, FManager.NoteCount,
+    'the manager must remain usable after its interface reference is released');
 end;
 
 initialization

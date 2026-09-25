@@ -35,12 +35,12 @@ type
 
   TNoteEditorContext = class(TInterfacedObject, INoteEditorContext)
   private
-    FNoteManager: TNoteManager;
+    FNoteManager: INoteManager;
     FAutosaveService: IAutosaveService;
     FThemeService: IThemeService;
     FSettings: TSettings;
   public
-    constructor Create(ANoteManager: TNoteManager;
+    constructor Create(ANoteManager: INoteManager;
       AAutosaveService: IAutosaveService;
       AThemeService: IThemeService;
       ASettings: TSettings);
@@ -65,7 +65,7 @@ implementation
 
 { TNoteEditorContext }
 
-constructor TNoteEditorContext.Create(ANoteManager: TNoteManager;
+constructor TNoteEditorContext.Create(ANoteManager: INoteManager;
   AAutosaveService: IAutosaveService;
   AThemeService: IThemeService;
   ASettings: TSettings);

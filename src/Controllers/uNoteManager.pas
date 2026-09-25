@@ -10,7 +10,26 @@ uses
 type
   TNoteEvent = procedure(const ANote: TNote) of object;
 
-  TNoteManager = class
+  // Read/write view of the note collection consumed by collaborators (editor
+  // context, notes list, backup service). TNoteManager implements it; the
+  // composition root (TNoteApplication) owns construction and lifetime.
+  INoteManager = interface
+    ['{6F1A2B3C-4D5E-6F70-8192-A3B4C5D6E7F8}']
+    function CreateNote(const ATitle, AContent: string; AColor: TNoteColor;
+      ALeft, ATop, AWidth, AHeight: Integer; AAlwaysOnTop: Boolean): TNote;
+    function AddNote(ANote: TNote): Boolean;
+    function DeleteNote(const ANoteID: Int64): Boolean;
+    procedure SaveNote(const ANote: TNote);
+    procedure PersistNote(const ANote: TNote);
+    procedure Initialize;
+    procedure Finalize;
+    function GetNoteCount: Integer;
+    function GetNote(Index: Integer): TNote;
+    property NoteCount: Integer read GetNoteCount;
+    property Notes[Index: Integer]: TNote read GetNote; default;
+  end;
+
+  TNoteManager = class(TInterfacedObject, INoteManager)
   private
     FStorage: INoteStorage;
     FNotes: TObjectList<TNote>;
@@ -22,6 +41,13 @@ type
     FOnNoteCloseRequested: TNoteEvent;
     function GetNoteCount: Integer;
     function GetNote(Index: Integer): TNote;
+  protected
+    // The composition root (TNoteApplication) owns this object explicitly, so
+    // interface references must NOT participate in reference counting -
+    // otherwise a consumer holding INoteManager could free the manager while
+    // its owner still uses it.
+    function _AddRef: Integer; stdcall;
+    function _Release: Integer; stdcall;
   public
     constructor Create(const AStorage: INoteStorage);
     destructor Destroy; override;
@@ -63,6 +89,16 @@ type
 implementation
 
 { TNoteManager }
+
+function TNoteManager._AddRef: Integer;
+begin
+  Result := -1; // no reference counting - see the protected declaration
+end;
+
+function TNoteManager._Release: Integer;
+begin
+  Result := -1;
+end;
 
 constructor TNoteManager.Create(const AStorage: INoteStorage);
 begin
