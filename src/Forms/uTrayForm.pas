@@ -103,6 +103,10 @@ type
 
 var
   TrayForm: TTrayForm;
+  // Optional isolated profile directory, set from the command line with
+  // `--profile=<dir>` (used for smoke testing so the real %APPDATA%\StickyNotes
+  // is never touched). Empty means the normal per-user profile.
+  AppProfileOverride: string = '';
 
 implementation
 
@@ -118,8 +122,9 @@ begin
   FNoteForms := TList<TNoteForm>.Create;
   FAppearMessage := 0;
 
-  // Application orchestration layer (owns all services)
-  FApplication := TNoteApplication.Create(Handle);
+  // Application orchestration layer (owns all services). AppProfileOverride
+  // (from --profile=<dir>) redirects the whole profile for smoke testing.
+  FApplication := TNoteApplication.Create(Handle, AppProfileOverride);
 
   // Wire UI callbacks
   FApplication.OnNoteCreated := OnNoteCreated;

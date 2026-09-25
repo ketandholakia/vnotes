@@ -49,8 +49,14 @@ uses
 
 var
   SingleInstance: TSingleInstance;
+  I: Integer;
 
 begin
+  // Optional isolated profile for smoke testing: --profile=<dir>.
+  // Never touches the real %APPDATA%\StickyNotes when supplied.
+  for I := 1 to ParamCount do
+    if SameText(Copy(ParamStr(I), 1, 10), '--profile=') then
+      AppProfileOverride := Copy(ParamStr(I), 11, MaxInt);
   // Phase 4C: ensure only one V-Notes instance runs for this user.
   // Acquire is performed before Application.Initialize so a second
   // launch can short-circuit without ever instantiating the tray form.

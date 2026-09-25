@@ -30,7 +30,8 @@ uses
   TSyncEngineTests in 'Models\TSyncEngineTests.pas',
   TSyncSchedulerTests in 'Models\TSyncSchedulerTests.pas',
   TSyncBackendTests in 'Models\TSyncBackendTests.pas',
-  TCredentialStoreTests in 'Models\TCredentialStoreTests.pas';
+  TCredentialStoreTests in 'Models\TCredentialStoreTests.pas',
+  TSyncIntegrationTests in 'Models\TSyncIntegrationTests.pas';
 
 var
   runner: ITestRunner;

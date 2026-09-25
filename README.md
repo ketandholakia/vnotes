@@ -57,9 +57,22 @@ Output: `src/Win32/Release/StickyNotes.exe`
 Quick `dcc32` builds (no MSBuild or RAD Studio command prompt needed — the scripts auto-locate `rsvars.bat` themselves via `DELPHI_ROOT`, or by probing Studio 23.0 → 22.0 → 21.0):
 
 ```bat
-build.bat        REM canonical Win32 Debug build -> src\Win32\Debug\StickyNotes.exe
+build.bat        REM canonical Win32 Debug build -> src\StickyNotes.exe
 build_tests.bat  REM DUnitX unit-test build -> tests\StickyNotes.Tests.exe
 ```
+
+### Isolated profile (safe smoke testing)
+
+The application normally uses `%APPDATA%\StickyNotes`. To run a throwaway instance that never
+touches your real notes, pass a profile directory:
+
+```bat
+src\StickyNotes.exe --profile=D:\temp\vnotes-smoke
+```
+
+`--profile` redirects the notes, `settings.ini`, the database, `vnotes.log`, `device.id` and the
+sync state to that folder, so a smoke test is fully isolated. Diagnostics land in
+`<profile>\vnotes.log`.
 
 ### Continuous integration
 
