@@ -27,7 +27,6 @@ object TrayForm: TTrayForm
     Top = 24
     object miNewNote: TMenuItem
       Caption = '&New Note'
-      ShortCut = 16462
       OnClick = miNewNoteClick
     end
     object miOpenNotes: TMenuItem

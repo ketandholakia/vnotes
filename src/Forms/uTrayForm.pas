@@ -10,7 +10,7 @@ uses
   uNote, uNoteManager, uSettings, uSettingsController,
   uAutosaveService, uHotkeyService, uThemeService, uBackupService,
   uStorage, uNoteQuery, uNoteForm, uNoteApplication, uNoteEditorContext,
-  uNotesListForm, uConflictForm, uServiceInterfaces;
+  uNotesListForm, uConflictForm, uServiceInterfaces, uILogger;
 
 type
   TTrayForm = class(TForm)
@@ -57,6 +57,9 @@ type
     FAppearMessage: UINT;
 
     procedure SetupHotkeys;
+    // Show the configured global hotkeys on the tray menu rather than the
+    // (wrong) value baked into the DFM.
+    procedure RefreshHotkeyShortcuts;
     procedure NoteFormClosed(Sender: TObject);
     procedure OnNewNote(Sender: TObject);
     procedure OnOpenNotesList(Sender: TObject);
@@ -154,6 +157,7 @@ begin
 
   // Setup hotkeys (needs form methods as callbacks)
   SetupHotkeys;
+  RefreshHotkeyShortcuts;
 
   // Setup tray
   tiMain.Icon := Application.Icon;
@@ -215,6 +219,23 @@ begin
     // Show any hotkey registration failures after attempting to register
     FApplication.HotkeyService.ShowHotkeyFailures;
   end;
+end;
+
+procedure TTrayForm.RefreshHotkeyShortcuts;
+var
+  NewNote, Search: TShortCut;
+begin
+  if (FApplication = nil) or (FApplication.Settings = nil) then Exit;
+  // The tray menu must advertise the *configured* global hotkeys. The DFM used
+  // to hardcode one (and wrongly: Ctrl+N), so both are now driven from settings.
+  NewNote := TextToShortCut(FApplication.Settings.HotkeyNewNote);
+  Search := TextToShortCut(FApplication.Settings.HotkeySearch);
+  miNewNote.ShortCut := NewNote;
+  miOpenNotes.ShortCut := Search;
+  CreateLogger.Info(Format(
+    'Tray menu shortcuts set from settings: NewNote="%s" (%d), Search="%s" (%d)',
+    [FApplication.Settings.HotkeyNewNote, NewNote,
+     FApplication.Settings.HotkeySearch, Search]));
 end;
 
 procedure TTrayForm.WndProc(var Message: TMessage);
@@ -313,6 +334,8 @@ begin
         FApplication.RefreshSyncSchedule;
         // Phase 7E: the engine was rebuilt, so re-wire its UI callbacks.
         WireSyncCallbacks;
+        // Hotkeys may have changed - keep the tray menu in sync.
+        RefreshHotkeyShortcuts;
         if miSyncNow <> nil then
           miSyncNow.Enabled := FApplication.SyncService <> nil;
 
