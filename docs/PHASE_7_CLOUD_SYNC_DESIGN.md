@@ -200,7 +200,7 @@ Design `ISyncBackend` so A, B, C are all expressible; ship B first.
 | **7C** | Conflict surfacing (conflict copies + replace/discard UI) | Real conflicts observed in practice |
 | **7D** | Background/interval sync + tray status (mirrors the backup scheduler UX) | 7B/7C stable |
 | **7E** | `TWebDavBackend` with `ETag`/`If-Match` | A provider target is chosen |
-| **7F** | End-to-end encryption | Legal/privacy requirement demonstrated |
+| **7F** | End-to-end encryption | Legal/privacy requirement demonstrated — **decided: deferred** ([PHASE_7F_ENCRYPTION_DESIGN.md](PHASE_7F_ENCRYPTION_DESIGN.md)) |
 
 Each gate is evidence-driven (matches the project's existing decision-gate discipline) — do not
 front-run later phases.
