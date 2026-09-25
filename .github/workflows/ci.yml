@@ -30,6 +30,11 @@ concurrency:
 jobs:
   build-and-test:
     name: Build + tests (Delphi, Win32)
+    # SECURITY: a self-hosted runner executes whatever the workflow checks out.
+    # For a public repository, that must never include untrusted fork PRs. This
+    # guard runs pull_request jobs only when the PR head is a branch in THIS
+    # repository (a collaborator), and never for forks.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, windows, delphi]
     timeout-minutes: 30
     env:
