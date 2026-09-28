@@ -18,6 +18,8 @@ type
   public
     function IsConfigured: Boolean;
     function SyncNow: Boolean;
+    // Phase 7G/WP1: cancellation is not interesting for scheduler tests.
+    procedure Cancel;
     function GetOnProgress: TSyncProgress;
     procedure SetOnProgress(const Value: TSyncProgress);
     function GetOnComplete: TSyncComplete;
@@ -58,6 +60,11 @@ function TStubSyncService.SyncNow: Boolean;
 begin
   Inc(FSyncCount);
   Result := FNextResult;
+end;
+
+procedure TStubSyncService.Cancel;
+begin
+  // No-op in the stub; cancellation semantics are covered by the WP1 tests.
 end;
 
 function TStubSyncService.GetOnProgress: TSyncProgress;

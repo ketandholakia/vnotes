@@ -31,7 +31,8 @@ uses
   TSyncSchedulerTests in 'Models\TSyncSchedulerTests.pas',
   TSyncBackendTests in 'Models\TSyncBackendTests.pas',
   TCredentialStoreTests in 'Models\TCredentialStoreTests.pas',
-  TSyncIntegrationTests in 'Models\TSyncIntegrationTests.pas';
+  TSyncIntegrationTests in 'Models\TSyncIntegrationTests.pas',
+  TSyncFoundationTests in 'Models\TSyncFoundationTests.pas';
 
 var
   runner: ITestRunner;

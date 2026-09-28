@@ -234,6 +234,15 @@ begin
     FBackupScheduler.Stop;
   if FSyncScheduler <> nil then
     FSyncScheduler.Stop;
+  // Phase 7G/WP1: stop the sync worker before anything it can reach is
+  // finalized. Cancel first (cooperative), then wait - WaitForIdle keeps
+  // pumping the main-thread queue, so the worker's remaining marshalled
+  // mutations/callbacks complete and no sync thread can outlive
+  // FNoteManager.Finalize below.
+  if FSyncService <> nil then
+    FSyncService.Cancel;
+  if FSyncRunner <> nil then
+    FSyncRunner.WaitForIdle;
   if FAutosaveService <> nil then
     FAutosaveService.Flush;
   SaveSettings;

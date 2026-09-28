@@ -144,6 +144,11 @@ type
     ['{A1B2C3D4-E5F6-7890-ABCD-EF1234567900}']
     function IsConfigured: Boolean;
     function SyncNow: Boolean;
+    // Phase 7G/WP1: cooperative cancellation. Asks an in-flight run to stop at
+    // its next checkpoint (between per-note operations / before backend
+    // calls); a cancelled run does not write sync state. Safe to call at any
+    // time, including when no run is active.
+    procedure Cancel;
     function GetOnProgress: TSyncProgress;
     procedure SetOnProgress(const Value: TSyncProgress);
     function GetOnComplete: TSyncComplete;

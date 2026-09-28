@@ -1150,3 +1150,25 @@ Two precision tests added to `tests/Models/TBackupServiceTests.pas`:
 | 3 | MSBuild (`msbuild src\StickyNotes.dproj /t:Build /p:Config=Debug /p:Platform=Win32`) | **PASS** — 0 errors |
 | 4 | Git Diff Check (`git diff --check`) | **PASS** — clean |
 | 5 | Data Integrity & Recovery Verification | **PASS** — Original JSON files preserved untouched; no dual-write; no stale JSON fallback; no silent database overwrites. |
+
+## Phase 7G - Sync Hardening (review 2026-09-28) - WP1: Snapshot + CAS Foundation - COMPLETE + VALIDATED (2026-09-28)
+
+> **Status:** **COMPLETE + VALIDATED** - WP1 of the Phase 7G sync-hardening work (design: [PHASE_7G_RECONCILE_DESIGN.md](PHASE_7G_RECONCILE_DESIGN.md)). The sync worker now reconciles from an immutable, main-thread-captured value snapshot and applies every local mutation through a main-thread compare-and-set (GUID + expected Rev): if a note changed or was deleted while the run was in flight, the stale mutation is deferred to the next run instead of overwriting the concurrent edit. Runs are non-reentrant and cooperatively cancellable (`ISyncService.Cancel`), and `TNoteApplication.Shutdown` now cancels and waits for the worker before autosave/settings/Finalize. Reconcile semantics and all on-disk formats are unchanged; the WP5 rewrite builds on this foundation.
+
+### What Changed
+
+- **`uSyncEngine.pas`**: `TSyncNoteSnapshot` (Guid, Rev, DeviceId, Title, Payload, Signature, geometry - payload/signature serialised on the main thread) and `TSyncApplyResult`; `TryApplyNoteCAS` / `TryCreateNoteCAS` main-thread CAS entry points; `Cancel` with checkpointed cancellation (checked between per-note operations and before every backend call; an aborted run writes no state); non-reentrancy gate on `SyncNow`; every backend write of a local payload is preceded by a main-thread snapshot validation; the synced baseline now records only revisions that actually completed (deferred notes keep their previous entry - never a re-read of the live note); partial runs report "; N deferred to next run".
+- **`uServiceInterfaces.pas`**: `ISyncService.Cancel`.
+- **`uNoteApplication.pas`**: shutdown order is now stop schedulers -> cancel -> WaitForIdle -> flush autosave -> save settings -> Finalize, so no sync worker can outlive `FNoteManager.Finalize`.
+- **`tests/Models/TSyncFoundationTests.pas`** (registered in `tests/StickyNotes.Tests.dpr`): 8 focused tests covering the snapshot/CAS boundary, mid-run edit/delete safety, cancellation, non-reentrancy and the wait semantics.
+
+### Validation Results (2026-09-28)
+
+| # | Check | Result |
+|---|-------|--------|
+| 1 | Main build (`build.bat`) | **PASS** - 0 errors (54979 lines) |
+| 2 | Test build (`build_tests.bat`) | **PASS** - 0 errors |
+| 3 | Automated Test Suite (`StickyNotes.Tests.exe`, APPDATA redirected) | **PASS** - **279 Found / 279 Passed / 0 Failed / 0 Errored / 0 Leaked / 0 Ignored** (271 baseline + 8 new) |
+| 4 | Thread-safety audit (live `TNote` access in the sync path) | **PASS** - main-thread snapshot / main-thread CAS only; no worker-side access to live notes; no `Touch`/`SaveNote` in the engine |
+| 5 | Git diff check (`git diff --check`) | **PASS** - clean |
+| 6 | Production/data safety | **PASS** - reconcile semantics and `sync-state.json` format unchanged; tests ran against temp sandboxes; live `%APPDATA%\StickyNotes` untouched |
