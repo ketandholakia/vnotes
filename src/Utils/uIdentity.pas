@@ -15,6 +15,12 @@ interface
 // A globally-unique note identifier: UUIDv4 rendered lowercase, no braces.
 function GenerateNoteGuid: string;
 
+// True when AGuid matches the canonical note guid shape: lowercase hex in the
+// 8-4-4-4-12 layout - the format GenerateNoteGuid produces. Version/variant
+// nibbles are deliberately not constrained: the deterministic conflict-copy
+// guids of the Phase 7G reconcile use the same shape (design S3.2).
+function IsValidNoteGuid(const AGuid: string): Boolean;
+
 // Stable per-installation device identifier, persisted in <ABasePath>\device.id
 // and created on first use. Deliberately NOT part of the backup set: restoring a
 // backup on another machine must not clone its device identity.
@@ -38,6 +44,24 @@ begin
     raise Exception.Create('GenerateNoteGuid: CreateGUID failed');
   Result := GUIDToString(G);                        // {XXXXXXXX-....-XXXXXXXXXXXX}
   Result := LowerCase(Copy(Result, 2, Length(Result) - 2)); // strip braces
+end;
+
+function IsValidNoteGuid(const AGuid: string): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  if Length(AGuid) <> 36 then Exit;
+  for I := 1 to 36 do
+  begin
+    case I of
+      9, 14, 19, 24:
+        if AGuid[I] <> '-' then Exit;
+    else
+      if not CharInSet(AGuid[I], ['0'..'9', 'a'..'f']) then Exit;
+    end;
+  end;
+  Result := True;
 end;
 
 function GetOrCreateDeviceId(const ABasePath: string): string;

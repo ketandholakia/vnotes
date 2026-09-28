@@ -149,6 +149,11 @@ type
     // calls); a cancelled run does not write sync state. Safe to call at any
     // time, including when no run is active.
     procedure Cancel;
+    // Phase 7G/WP2: record a local note deletion in the sync journal at the
+    // moment it actually happened (durable immediately; WP5 propagates it as a
+    // tombstone). Typically called from the UI thread; repeated calls for the
+    // same guid must not create duplicate entries.
+    procedure RecordLocalDeletion(const AGuid: string; ARev: Int64);
     function GetOnProgress: TSyncProgress;
     procedure SetOnProgress(const Value: TSyncProgress);
     function GetOnComplete: TSyncComplete;

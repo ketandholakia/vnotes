@@ -32,7 +32,9 @@ uses
   TSyncBackendTests in 'Models\TSyncBackendTests.pas',
   TCredentialStoreTests in 'Models\TCredentialStoreTests.pas',
   TSyncIntegrationTests in 'Models\TSyncIntegrationTests.pas',
-  TSyncFoundationTests in 'Models\TSyncFoundationTests.pas';
+  TSyncFoundationTests in 'Models\TSyncFoundationTests.pas',
+  TSyncPersistenceTests in 'Models\TSyncPersistenceTests.pas',
+  TSyncDeletionTests in 'Models\TSyncDeletionTests.pas';
 
 var
   runner: ITestRunner;

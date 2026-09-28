@@ -30,12 +30,17 @@ unit uSyncEngine;
 // WP1 deliberately keeps the reconcile semantics above unchanged; the WP5
 // rewrite (docs/PHASE_7G_RECONCILE_DESIGN.md) replaces them on top of this
 // snapshot + CAS foundation.
+//
+// Phase 7G/WP2: sync-state.json is now version 2 ({"version":2,"synced":...};
+// v1 files migrate once into the journal) and local deletions are recorded
+// durably in sync-journal.json via RecordLocalDeletion (the journal is loaded
+// on the main thread before each run).
 
 interface
 
 uses
   System.SysUtils, System.Generics.Collections,
-  uNote, uNoteManager, uServiceInterfaces;
+  uNote, uNoteManager, uServiceInterfaces, uSyncJournal;
 
 type
   // WP1: outcome of a compare-and-set mutation attempt made on the sync
@@ -68,6 +73,9 @@ type
     FStatePath: string;
     FSynced: TDictionary<string, Int64>;    // guid -> rev at last successful sync
     FDeleted: TDictionary<string, Boolean>; // guids deleted locally since a prior sync
+    // WP2: durable local-deletion journal (sync-journal.json, sibling of the
+    // state file); the UI thread records into it while a run may be loading it.
+    FJournal: TSyncJournal;
     FOnProgress: TSyncProgress;
     FOnComplete: TSyncComplete;
     // WP1: run gate and cooperative cancellation. Both fields are touched from
@@ -80,6 +88,9 @@ type
     procedure SetOnComplete(const Value: TSyncComplete);
     procedure Report(const AMessage: string; AProgress: Integer);
     procedure NotifyComplete(const ASuccess: Boolean; const AMessage: string);
+    // WP2: parses sync-journal.json on the main thread (before reconcile), so
+    // the worker only consumes already-loaded values.
+    procedure LoadJournalOnMainThread;
     procedure LoadState;
     procedure SaveState;
     function ContentSignature(const ANote: TNote): string;
@@ -107,6 +118,10 @@ type
     // from any thread; a run notices at its next checkpoint and stops without
     // writing sync state.
     procedure Cancel;
+    // Phase 7G/WP2: record a local note deletion in the journal the moment it
+    // actually happened - durable before the next run ever starts. Repeated
+    // calls for the same guid never produce a second entry.
+    procedure RecordLocalDeletion(const AGuid: string; ARev: Int64);
     // Phase 7G/WP1: main-thread compare-and-set entry points used by the
     // reconcile below (and by the WP1 tests). AMutation runs on the main
     // thread, and only if the note still exists and still has AExpectedRev.
@@ -125,7 +140,7 @@ implementation
 
 uses
   System.JSON, System.Classes, System.SyncObjs, System.IOUtils,
-  uJsonStorage, uILogger, uMainThread;
+  uJsonStorage, uSyncState, uILogger, uMainThread;
 
 type
   // Raised by CheckCancelled to unwind a run that was cancelled. Private to
@@ -136,6 +151,8 @@ type
 
 constructor TSyncEngine.Create(const ANoteManager: INoteManager; const ABackend: ISyncBackend;
   const AStateFilePath: string);
+var
+  JournalPath: string;
 begin
   inherited Create;
   FNoteManager := ANoteManager;
@@ -145,10 +162,16 @@ begin
   FDeleted := TDictionary<string, Boolean>.Create;
   FSyncActive := 0;
   FCancelRequested := 0;
+  // WP2: the journal lives next to the state file (design S4.2).
+  JournalPath := '';
+  if FStatePath <> '' then
+    JournalPath := TPath.Combine(TPath.GetDirectoryName(FStatePath), 'sync-journal.json');
+  FJournal := TSyncJournal.Create(JournalPath);
 end;
 
 destructor TSyncEngine.Destroy;
 begin
+  FJournal.Free;
   FSynced.Free;
   FDeleted.Free;
   inherited;
@@ -228,6 +251,17 @@ procedure TSyncEngine.CheckCancelled;
 begin
   if IsCancelled then
     raise ESyncCancelled.Create('Sync run cancelled');
+end;
+
+procedure TSyncEngine.RecordLocalDeletion(const AGuid: string; ARev: Int64);
+begin
+  // Called the moment a note was actually deleted locally (the application
+  // hooks TNoteManager.OnNoteDeleted, whose event only fires after the storage
+  // delete succeeded). Durable immediately: a crash before the next run must
+  // not lose the deletion (design S4.2). Journal.Add is per-guid, so repeated
+  // delete attempts never produce duplicate entries.
+  FJournal.Add(AGuid, ARev, Now);
+  FJournal.Save;
 end;
 
 function TSyncEngine.FindNoteByGuid(const AGuid: string): TNote;
@@ -335,63 +369,46 @@ begin
   Result := Outcome;
 end;
 
+procedure TSyncEngine.LoadJournalOnMainThread;
+var
+  LoadError: string;
+begin
+  if FJournal.Path = '' then Exit;
+  LoadError := '';
+  // The journal is parsed on the main thread (WP2 design S16): the worker only
+  // consumes already-loaded values. The explicit error capture keeps this
+  // robust regardless of how TThread.Synchronize propagates exceptions.
+  TMainInvoker.Run(
+    procedure
+    begin
+      try
+        FJournal.Load;
+      except
+        on E: Exception do
+          LoadError := E.Message;
+      end;
+    end);
+  if LoadError <> '' then
+    raise ESyncJournalError.Create('sync journal could not be loaded: ' + LoadError);
+end;
+
 procedure TSyncEngine.LoadState;
 var
-  Text: string;
-  Root: TJSONValue;
-  Obj, SyncedObj: TJSONObject;
-  DeletedArr: TJSONArray;
-  Pair: TJSONPair;
-  I: Integer;
+  Loaded: TDictionary<string, Int64>;
 begin
-  FSynced.Clear;
-  FDeleted.Clear;
-  if (FStatePath = '') or (not FileExists(FStatePath)) then Exit;
-  try
-    Text := TFile.ReadAllText(FStatePath);
-    Root := TJSONObject.ParseJSONValue(Text);
-    try
-      if not (Root is TJSONObject) then Exit;
-      Obj := Root as TJSONObject;
-      SyncedObj := Obj.GetValue('synced') as TJSONObject;
-      if SyncedObj <> nil then
-        for Pair in SyncedObj do
-          FSynced.AddOrSetValue(Pair.JsonString.Value, (Pair.JsonValue as TJSONNumber).AsInt64);
-      DeletedArr := Obj.GetValue('deleted') as TJSONArray;
-      if DeletedArr <> nil then
-        for I := 0 to DeletedArr.Count - 1 do
-          FDeleted.AddOrSetValue(DeletedArr.Items[I].Value, True);
-    finally
-      Root.Free;
-    end;
-  except
-    on E: Exception do
-      CreateLogger.Warning('Sync: could not read sync state (' + E.Message + '); treating as first sync');
-  end;
+  // WP2: version-2 state (with a one-time v1 -> v2 migration into the
+  // journal). A file that cannot be used raises - the run then aborts instead
+  // of silently treating synchronized metadata as empty. FDeleted is
+  // runtime-only in v2 and deliberately keeps accumulating for the engine's
+  // lifetime (its in-file role has moved to the journal).
+  Loaded := LoadSyncState(FStatePath, FJournal);
+  FSynced.Free;
+  FSynced := Loaded;
 end;
 
 procedure TSyncEngine.SaveState;
-var
-  Obj, SyncedObj: TJSONObject;
-  DeletedArr: TJSONArray;
-  Guid: string;
 begin
-  Obj := TJSONObject.Create;
-  try
-    SyncedObj := TJSONObject.Create;
-    for Guid in FSynced.Keys do
-      SyncedObj.AddPair(Guid, TJSONNumber.Create(FSynced[Guid]));
-    Obj.AddPair('synced', SyncedObj);
-
-    DeletedArr := TJSONArray.Create;
-    for Guid in FDeleted.Keys do
-      DeletedArr.Add(Guid);
-    Obj.AddPair('deleted', DeletedArr);
-
-    TFile.WriteAllText(FStatePath, Obj.ToJSON, TEncoding.UTF8);
-  finally
-    Obj.Free;
-  end;
+  SaveSyncState(FStatePath, FSynced);
 end;
 
 function TSyncEngine.ContentSignature(const ANote: TNote): string;
@@ -534,6 +551,7 @@ begin
       AppliedPulls := TDictionary<string, Int64>.Create;
       try
         UseETags := FBackend.SupportsETags;
+        LoadJournalOnMainThread; // main-thread parse (WP2 S16); fails the run if unreadable
         LoadState;
         Report('Scanning local notes...', 10);
         CaptureSnapshot(Snapshot); // main thread; worker never sees a live TNote

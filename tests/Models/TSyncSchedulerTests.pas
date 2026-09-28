@@ -20,6 +20,8 @@ type
     function SyncNow: Boolean;
     // Phase 7G/WP1: cancellation is not interesting for scheduler tests.
     procedure Cancel;
+    // Phase 7G/WP2: deletion journaling is not interesting here either.
+    procedure RecordLocalDeletion(const AGuid: string; ARev: Int64);
     function GetOnProgress: TSyncProgress;
     procedure SetOnProgress(const Value: TSyncProgress);
     function GetOnComplete: TSyncComplete;
@@ -65,6 +67,11 @@ end;
 procedure TStubSyncService.Cancel;
 begin
   // No-op in the stub; cancellation semantics are covered by the WP1 tests.
+end;
+
+procedure TStubSyncService.RecordLocalDeletion(const AGuid: string; ARev: Int64);
+begin
+  // No-op in the stub; journaling is covered by the WP2 tests.
 end;
 
 function TStubSyncService.GetOnProgress: TSyncProgress;

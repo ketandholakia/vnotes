@@ -40,6 +40,9 @@ type
     function GetSettings: TSettings;
     function GetNoteManager: INoteManager;
     procedure LoadSettings;
+    // Phase 7G/WP2: records the deletion in the sync journal (when sync is
+    // configured), then forwards to the public OnNoteDeleted event as before.
+    procedure HandleNoteDeleted(const ANote: TNote);
   public
     procedure SaveSettings;
     // ABasePath is an isolation seam: supply an explicit directory to keep the
@@ -151,6 +154,11 @@ begin
 
   FNoteManager := TNoteManager.Create(FStorage);
 
+  // Phase 7G/WP2: every actual local deletion must reach the sync journal.
+  // Wired here (not in Initialize) so the canonical deletion pathway is always
+  // active - including in the test host, which deliberately skips Initialize.
+  FNoteManager.OnNoteDeleted := HandleNoteDeleted;
+
   // Phase 7E: sync secrets live in the OS credential store, never in settings.ini.
   FCredentialStore := CreateWindowsCredentialStore;
 
@@ -210,7 +218,7 @@ begin
 
   FNoteManager.OnNoteCreated := FOnNoteCreated;
   FNoteManager.OnNoteChanged := FOnNoteChanged;
-  FNoteManager.OnNoteDeleted := FOnNoteDeleted;
+  // OnNoteDeleted is wired in the constructor (Phase 7G/WP2 journal hook).
   FNoteManager.OnNoteOpenRequested := FOnNoteOpenRequested;
   FNoteManager.OnNoteCloseRequested := FOnNoteCloseRequested;
 
@@ -248,6 +256,24 @@ begin
   SaveSettings;
   if FNoteManager <> nil then
     FNoteManager.Finalize;
+end;
+
+procedure TNoteApplication.HandleNoteDeleted(const ANote: TNote);
+begin
+  // The note was actually deleted (the manager fires this only after the
+  // storage delete succeeded): make the deletion durable for sync before the
+  // note object goes away. A journal failure must never break the deletion
+  // UX - it is logged, and only the sync propagation of this deletion is lost.
+  if (FSyncService <> nil) and (ANote <> nil) and (ANote.Guid <> '') then
+  try
+    FSyncService.RecordLocalDeletion(ANote.Guid, ANote.Rev);
+  except
+    on E: Exception do
+      CreateLogger.Error('Sync: could not record local deletion of ' +
+        ANote.Guid + ': ' + E.Message);
+  end;
+  if Assigned(FOnNoteDeleted) then
+    FOnNoteDeleted(ANote);
 end;
 
 procedure TNoteApplication.RefreshBackupSchedule;
