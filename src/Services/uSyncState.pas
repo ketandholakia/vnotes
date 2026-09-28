@@ -145,7 +145,7 @@ end;
 procedure SaveSyncState(const APath: string; const ASynced: TDictionary<string, Int64>);
 var
   Obj, SyncedObj: TJSONObject;
-  Guid: string;
+  Guid, Text: string;
 begin
   Obj := TJSONObject.Create;
   try
@@ -154,7 +154,9 @@ begin
     for Guid in ASynced.Keys do
       SyncedObj.AddPair(Guid, TJSONNumber.Create(ASynced[Guid]));
     Obj.AddPair('synced', SyncedObj);
-    WriteTextAtomic(APath, Obj.ToJSON);
+    Text := Obj.ToJSON;
+    AssureValidJsonText(Text); // WP4 S13: never hand garbage to the writer
+    WriteTextAtomic(APath, Text);
   finally
     Obj.Free;
   end;

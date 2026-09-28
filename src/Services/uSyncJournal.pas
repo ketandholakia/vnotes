@@ -197,6 +197,7 @@ procedure TSyncJournal.SaveCore;
 var
   Obj, Deletions, Entry: TJSONObject;
   Tombstone: TSyncTombstone;
+  Text: string;
 begin
   if not FLoaded then
     raise ESyncJournalError.Create(
@@ -214,7 +215,9 @@ begin
       Deletions.AddPair(Tombstone.Guid, Entry);
     end;
     Obj.AddPair('deletions', Deletions);
-    WriteTextAtomic(FPath, Obj.ToJSON);
+    Text := Obj.ToJSON;
+    AssureValidJsonText(Text); // WP4 S13: never hand garbage to the writer
+    WriteTextAtomic(FPath, Text);
   finally
     Obj.Free;
   end;

@@ -74,11 +74,15 @@ type
   // WP3: accounting for one sync run. Counts include only operations that
   // actually completed; Deferred counts operations skipped for the next run
   // (they never advance the baseline). Succeeded means the run finished
-  // without an abort (deferrals are allowed); Cancelled marks a run stopped
-  // by ISyncService.Cancel.
+  // without an abort AND its metadata was persisted (deferrals are allowed);
+  // Cancelled marks a run stopped by ISyncService.Cancel.
   TSyncRunSummary = record
     Succeeded: Boolean;
     Cancelled: Boolean;
+    // WP4: the operations completed but the sync metadata could not be
+    // persisted (the previous valid metadata was preserved); the run is not
+    // reported as fully synchronized.
+    MetadataFailed: Boolean;
     Pushed: Integer;     // local payloads accepted by the backend
     Pulled: Integer;     // remote payloads applied locally
     Created: Integer;    // of Pulled: notes newly created locally
@@ -838,13 +842,23 @@ begin
             NewSynced.Free;
           end;
 
-          SaveState;
+          // WP4: persist the metadata. A failure here is distinguishable from
+          // an operation failure: the run still reports failed, and
+          // MetadataFailed marks that the operations themselves had completed
+          // and only the metadata write was lost (the old file was preserved).
+          try
+            SaveState;
+          except
+            FLastRunSummary.MetadataFailed := True;
+            raise;
+          end;
           Report('Sync complete', 100);
           Result := True;
           // WP3: publish the run accounting - only completed operations are in
           // these counts; deferred ones are counted separately.
           FLastRunSummary.Succeeded := True;
           FLastRunSummary.Cancelled := False;
+          FLastRunSummary.MetadataFailed := False;
           FLastRunSummary.Pushed := Pushed;
           FLastRunSummary.Pulled := Pulled;
           FLastRunSummary.Created := Created;
