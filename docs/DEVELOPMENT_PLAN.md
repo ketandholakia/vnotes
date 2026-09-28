@@ -1196,3 +1196,22 @@ Two precision tests added to `tests/Models/TBackupServiceTests.pas`:
 | 3 | Automated Test Suite (`StickyNotes.Tests.exe`, APPDATA redirected) | **PASS** - **292 Found / 292 Passed / 0 Failed / 0 Errored / 0 Leaked / 0 Ignored** (279 baseline + 13 new) |
 | 4 | Thread-safety audit (journal/state/note access) | **PASS** - journal lock-protected; journal parsed on the main thread before reconcile; no new worker access to application-owned objects |
 | 5 | Data safety | **PASS** - corrupt/unsupported metadata raises and is preserved; migration is journal-first and idempotent; live `%APPDATA%\StickyNotes` untouched (temp sandboxes) |
+
+## Phase 7G - Sync Hardening (review 2026-09-28) - WP3: Applied-Operation Baseline Tracking - COMPLETE + VALIDATED (2026-09-28)
+
+> **Status:** **COMPLETE + VALIDATED** - WP3 of the Phase 7G sync-hardening work (design: [PHASE_7G_RECONCILE_DESIGN.md](PHASE_7G_RECONCILE_DESIGN.md); implementation commit 44ff8f4). The synced baseline now advances strictly from operations that actually completed: a note created from the remote advances to the applied remote revision (design S2.4), while deferred, cancelled or failed work keeps its previous baseline and is retried by the next run. A per-run accounting record (`LastRunSummary`: Succeeded/Cancelled plus Pushed/Pulled/Created/Removed/Conflicts/Deferred) is published on every exit path. No WP5 winner/decision logic is introduced; the tombstone journal survives incomplete runs and is never cleared by observation.
+
+### What Changed
+
+- **`uSyncEngine.pas`**: created-from-remote notes are now recorded in the baseline (`CreatedGuids` -> applied remote rev, merged into the rebuilt baseline); new `TSyncRunSummary` record + `LastRunSummary` property, zeroed at run start and filled on every exit path (success / cancellation / abort); counters are initialised up front so failure-path accounting is meaningful.
+- **`tests/Models/TSyncBaselineTests.pas`** (new, 15 tests): remote-apply advance; CAS failure keeps baseline; push failure/success; create failure/success; delete failure (baseline unchanged, tombstone preserved, state byte-identical) and success (accounting + remote removal); mixed run (A = new, B = old, C = new); cancellation (partial local progress, no state write, no operation starts after cancel); save contains only completed operations (plus a failed run leaving state byte-identical); restart retries deferred work; tombstone survives failed and cancelled runs; success does not clear unrelated tombstones; state-save failure surfaces (push succeeded, run reports failed, no silent state).
+
+### Validation Results (2026-09-28)
+
+| # | Check | Result |
+|---|-------|--------|
+| 1 | Main build (`build.bat`) | **PASS** - 0 errors (55680 lines) |
+| 2 | Test build (`build_tests.bat`) | **PASS** - 0 errors |
+| 3 | Automated Test Suite (`StickyNotes.Tests.exe`, APPDATA redirected) | **PASS** - **307 Found / 307 Passed / 0 Failed / 0 Errored / 0 Leaked / 0 Ignored** (292 baseline + 15 new) |
+| 4 | Thread-safety audit | **PASS** - no new worker access to live notes; run accounting written only by the run thread at its exit points |
+| 5 | Design consistency audit | **PASS** - baseline-from-applied-only, deferred freeze, journal preservation, WP1 CAS boundary and WP2 infrastructure reuse verified; empty-store safety remains deferred to WP5 (reported, not silently changed) |
