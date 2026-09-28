@@ -185,15 +185,34 @@ procedure TSyncEngineTestFixture.TestLocalDeletionIsPropagatedAndNotResurrected;
 var
   N: TNote;
   Guid: string;
+  Remote: TNote;
+  Root: TJSONValue;
 begin
   N := FManager.CreateNote('Doomed', 'x', ncYellow, 10, 10, 300, 200, False);
   Assert.IsTrue(FEngine.SyncNow);
   Guid := N.Guid;
   Assert.IsTrue(TFile.Exists(RemoteNoteFile(Guid)), 'note should be on remote before delete');
 
+  // WP5: a local deletion is journaled (the application flow records it the
+  // moment it happens) and propagated as a tombstone - never by absence.
+  FEngine.RecordLocalDeletion(Guid, N.Rev);
   Assert.IsTrue(FManager.DeleteNote(N.ID), 'local delete should succeed');
   Assert.IsTrue(FEngine.SyncNow, 'second sync should succeed');
-  Assert.IsFalse(TFile.Exists(RemoteNoteFile(Guid)), 'deletion must be propagated to remote');
+  Assert.IsTrue(TFile.Exists(RemoteNoteFile(Guid)),
+    'the remote object must survive as a tombstone');
+  Root := TJSONObject.ParseJSONValue(TFile.ReadAllText(RemoteNoteFile(Guid)));
+  try
+    Remote := TJsonStorage.JsonToNote(Root as TJSONObject);
+    try
+      Assert.IsTrue(Remote.Deleted, 'deletion must be propagated as a tombstone');
+      Assert.AreEqual<Int64>(2, Remote.Rev,
+        'the tombstone rev must exceed the deleted note''s rev');
+    finally
+      Remote.Free;
+    end;
+  finally
+    Root.Free;
+  end;
 
   // A further sync must not resurrect the deleted note from the remote.
   Assert.IsTrue(FEngine.SyncNow);

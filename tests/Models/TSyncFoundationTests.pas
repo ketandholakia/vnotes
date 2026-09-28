@@ -24,7 +24,7 @@ uses
   System.JSON, System.DateUtils, System.Generics.Collections, System.SyncObjs,
   DUnitX.TestFramework,
   uNote, uEnums, uStorage, uJsonStorage, uNoteManager, uServiceInterfaces,
-  uSyncEngine, uSyncRunner;
+  uSyncEngine, uSyncRunner, uSyncState;
 
 type
   // A controllable in-memory ISyncBackend. It counts backend writes and can
@@ -91,6 +91,8 @@ type
     // Reads the recorded baseline rev for a guid from sync-state.json;
     // -1 when the file or the entry is absent.
     function StateSyncedRev(const AGuid: string): Int64;
+    // Seeds a baseline of rev 1 for the given guids (test setup only).
+    procedure SeedBaseline(const AGuids: array of string);
     // Loads a note fresh from disk storage by local ID (caller frees).
     function ReloadNote(const AID: Int64): TNote;
   public
@@ -392,6 +394,21 @@ begin
   end;
 end;
 
+procedure TSyncFoundationTestFixture.SeedBaseline(const AGuids: array of string);
+var
+  Map: TDictionary<string, Int64>;
+  I: Integer;
+begin
+  Map := TDictionary<string, Int64>.Create;
+  try
+    for I := 0 to High(AGuids) do
+      Map.AddOrSetValue(AGuids[I], 1);
+    SaveSyncState(FStatePath, Map);
+  finally
+    Map.Free;
+  end;
+end;
+
 function TSyncFoundationTestFixture.ReloadNote(const AID: Int64): TNote;
 var
   Storage: INoteStorage;
@@ -582,6 +599,7 @@ end;
 procedure TSyncFoundationTestFixture.TestCancellationStopsTheRun;
 var
   N1, N2, N3: TNote;
+  StateBytes: string;
 begin
   N1 := FManager.CreateNote('C1', 'local-1', ncYellow, 10, 10, 300, 200, False);
   FBackend.Put(N1.Guid, BuildRemotePayload(N1.Guid, 3, 'C1', 'remote-1'));
@@ -589,6 +607,11 @@ begin
   FBackend.Put(N2.Guid, BuildRemotePayload(N2.Guid, 3, 'C2', 'remote-2'));
   N3 := FManager.CreateNote('C3', 'local-3', ncYellow, 30, 30, 300, 200, False);
   FBackend.Put(N3.Guid, BuildRemotePayload(N3.Guid, 3, 'C3', 'remote-3'));
+
+  // Seed the baseline so these are clean "only remote changed" pulls (no
+  // conflict copies): the test's focus is the cancellation window.
+  SeedBaseline([N1.Guid, N2.Guid, N3.Guid]);
+  StateBytes := TFile.ReadAllText(FStatePath);
 
   // The run pulls N1, then blocks on N2's read - giving us a deterministic
   // window to cancel mid-run.
@@ -610,7 +633,8 @@ begin
   Assert.AreEqual<string>('local-3', N3.Content, 'a cancelled run must not reach N3');
   Assert.IsFalse((FBackend).WasRead(N3.Guid),
     'processing must stop before reading N3');
-  Assert.IsFalse(TFile.Exists(FStatePath), 'a cancelled run must not write sync state');
+  Assert.AreEqual<string>(StateBytes, TFile.ReadAllText(FStatePath),
+    'a cancelled run must not modify sync state');
   Assert.AreEqual<Integer>(0, (FBackend).WriteCount);
 end;
 

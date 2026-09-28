@@ -43,6 +43,7 @@ type
     // Test controls.
     procedure Put(const AName, APayload: string);
     procedure FailWrite(const AName: string);
+    procedure AllowWrite(const AName: string);
     procedure FailRemove(const AName: string);
     procedure BlockReadOf(const AName: string);
     procedure ReleaseReads;
@@ -185,6 +186,15 @@ end;
 procedure TBaselineTestBackend.FailWrite(const AName: string);
 begin
   FFailWrites.Add(AName);
+end;
+
+procedure TBaselineTestBackend.AllowWrite(const AName: string);
+var
+  Idx: Integer;
+begin
+  Idx := FFailWrites.IndexOf(AName);
+  if Idx >= 0 then
+    FFailWrites.Delete(Idx);
 end;
 
 procedure TBaselineTestBackend.FailRemove(const AName: string);
@@ -574,35 +584,87 @@ end;
 procedure TSyncBaselineTestFixture.TestDeleteFailureKeepsBaselineAndTombstone;
 var
   T: TSyncTombstone;
-  StateBytesBefore: string;
+  RemoteN: TNote;
+  Root: TJSONValue;
 begin
+  // A deletion whose tombstone write fails is deferred (WP5): the journal
+  // entry stays, the baseline stays frozen, and the next run retries.
   SeedState([GX], [5]);
   SeedTombstone(GX, 5);
-  StateBytesBefore := ReadText(FStatePath);
-  FBackend.FailRemove(GX);
+  FBackend.Put(GX, BuildRemotePayload(GX, 5, 'X', 'remote-x'));
+  FBackend.FailWrite(GX); // the tombstone write fails once
 
-  Assert.IsFalse(FEngine.SyncNow, 'a failing delete must fail the run');
-  Assert.IsTrue(Pos('failed', LowerCase(FCompleteMsg)) > 0, FCompleteMsg);
-  Assert.AreEqual<string>(StateBytesBefore, ReadText(FStatePath),
-    'a failed run must not write state');
-  Assert.AreEqual<Int64>(5, StateSyncedRev(GX), 'the baseline must be unchanged');
-  Assert.IsTrue(JournalHas(GX, T), 'the tombstone must be preserved');
-  Assert.IsFalse(FEngine.LastRunSummary.Succeeded);
-  Assert.IsFalse(FEngine.LastRunSummary.Cancelled);
+  Assert.IsTrue(FEngine.SyncNow, 'a failed tombstone write defers; the run completes');
+  Assert.IsTrue(FEngine.LastRunSummary.Succeeded);
+  Assert.AreEqual<Integer>(1, FEngine.LastRunSummary.Deferred, 'the deletion must be deferred');
+  Assert.IsTrue(JournalHas(GX, T), 'the journal entry must be preserved for the retry');
+  Assert.AreEqual<Int64>(5, StateSyncedRev(GX), 'the pending deletion keeps its baseline');
+  Root := TJSONObject.ParseJSONValue(FBackend.Content(GX));
+  try
+    RemoteN := TJsonStorage.JsonToNote(Root as TJSONObject);
+    try
+      Assert.IsFalse(RemoteN.Deleted, 'the remote object must still be live');
+    finally
+      RemoteN.Free;
+    end;
+  finally
+    Root.Free;
+  end;
+
+  // Retry after the failure: the tombstone is written and the journal clears.
+  FBackend.AllowWrite(GX);
+  Assert.IsTrue(FEngine.SyncNow, 'the retry must succeed');
+  Assert.AreEqual<Integer>(1, FEngine.LastRunSummary.TombstonesWritten);
+  Assert.IsFalse(JournalHas(GX, T), 'the journal entry clears after the tombstone write');
+  Assert.AreEqual<Int64>(6, StateSyncedRev(GX), 'the baseline records the tombstone rev');
+  Root := TJSONObject.ParseJSONValue(FBackend.Content(GX));
+  try
+    RemoteN := TJsonStorage.JsonToNote(Root as TJSONObject);
+    try
+      Assert.IsTrue(RemoteN.Deleted, 'the remote object is now a tombstone');
+      Assert.AreEqual<Int64>(6, RemoteN.Rev);
+    finally
+      RemoteN.Free;
+    end;
+  finally
+    Root.Free;
+  end;
 end;
 
 procedure TSyncBaselineTestFixture.TestDeleteSuccessUpdatesBookkeeping;
+var
+  T: TSyncTombstone;
+  RemoteN: TNote;
+  Root: TJSONValue;
 begin
+  // A deletion with a durable journal entry and an unchanged remote writes a
+  // tombstone (WP5): the only deletion form in the new model.
   SeedState([GX], [5]);
+  SeedTombstone(GX, 5);
   FBackend.Put(GX, BuildRemotePayload(GX, 5, 'X', 'remote-x'));
 
   Assert.IsTrue(FEngine.SyncNow);
   Assert.IsTrue(FEngine.LastRunSummary.Succeeded);
-  Assert.AreEqual<Integer>(1, FEngine.LastRunSummary.Removed,
+  Assert.AreEqual<Integer>(0, FEngine.LastRunSummary.Removed,
+    'no local note is deleted in this direction');
+  Assert.AreEqual<Integer>(1, FEngine.LastRunSummary.TombstonesWritten,
     'the propagated deletion must be recorded in the run accounting');
-  Assert.AreEqual<Int64>(-1, StateSyncedRev(GX),
-    'current-model bookkeeping drops the guid once its deletion is propagated (WP5 revisits)');
-  Assert.IsFalse(FBackend.Contains(GX), 'the remote object must be gone');
+  Assert.IsFalse(JournalHas(GX, T), 'the journal entry clears after the tombstone write');
+  Assert.AreEqual<Int64>(6, StateSyncedRev(GX),
+    'the baseline records the tombstone rev (max(revR, journal) + 1)');
+  Assert.IsTrue(FBackend.Contains(GX), 'the remote object survives as a tombstone');
+  Root := TJSONObject.ParseJSONValue(FBackend.Content(GX));
+  try
+    RemoteN := TJsonStorage.JsonToNote(Root as TJSONObject);
+    try
+      Assert.IsTrue(RemoteN.Deleted, 'the remote object must be a tombstone');
+      Assert.AreEqual<Int64>(6, RemoteN.Rev);
+    finally
+      RemoteN.Free;
+    end;
+  finally
+    Root.Free;
+  end;
 end;
 
 procedure TSyncBaselineTestFixture.TestMixedRunKeepsOldBaselineForDeferred;
@@ -746,9 +808,12 @@ begin
   Assert.AreEqual<string>(JournalBytes, ReadText(FJournalPath),
     'a failed run must not touch the journal file');
 
-  // 2) A cancelled run preserves the tombstone too.
+  // 2) A cancelled run preserves the tombstone too. GX has a remote presence
+  // (so the sweep must leave its entry alone) but is ordered after GY, which
+  // blocks first - the cancellation stops the run before GX is processed.
   FBackend.RaiseOnListNames := False;
   FBackend.Put(GY, BuildRemotePayload(GY, 3, 'Y', 'remote-y'));
+  FBackend.Put(GX, BuildRemotePayload(GX, 5, 'X', 'remote-x'));
   FBackend.BlockReadOf(GY);
   FRunner.Start;
   Assert.IsTrue(PumpUntil(FBackend.ReadEntered, 5000), 'worker should reach the blocked read');
@@ -763,13 +828,20 @@ procedure TSyncBaselineTestFixture.TestSuccessDoesNotClearUnrelatedTombstone;
 var
   T: TSyncTombstone;
 begin
+  // GX's tombstone propagation is deferred (its write fails once); a
+  // successful, unrelated operation (GY) must not clear it.
+  SeedState([GX], [5]);
   SeedTombstone(GX, 5);
+  FBackend.Put(GX, BuildRemotePayload(GX, 5, 'X', 'remote-x'));
+  FBackend.FailWrite(GX);
   FBackend.Put(GY, BuildRemotePayload(GY, 3, 'Y', 'remote-y'));
 
   Assert.IsTrue(FEngine.SyncNow);
-  Assert.AreEqual<Integer>(1, FManager.NoteCount, 'the unrelated note was created');
+  Assert.AreEqual<Integer>(1, FEngine.LastRunSummary.Deferred);
   Assert.IsTrue(JournalHas(GX, T),
-    'a successful unrelated operation must not clear the tombstone (WP5 owns clearing)');
+    'a successful unrelated operation must not clear a deferred tombstone');
+  Assert.AreEqual<Int64>(5, StateSyncedRev(GX), 'the pending deletion keeps its baseline');
+  Assert.AreEqual<Integer>(1, FManager.NoteCount, 'the unrelated note was created');
 end;
 
 procedure TSyncBaselineTestFixture.TestStateSaveFailureIsSurfaced;
@@ -779,9 +851,11 @@ var
   Engine2Ref: ISyncService;
   N: TNote;
 begin
-  // Point the state file into a folder that does not exist: the push succeeds,
-  // but the metadata write cannot.
-  BadStatePath := TPath.Combine(TPath.Combine(FBase, 'missing-dir'), 'sync-state.json');
+  // Point the state file at a directory: the push succeeds, but the atomic
+  // replace of the metadata cannot (a directory cannot be replaced by a file).
+  BadStatePath := TPath.Combine(TPath.Combine(FBase, 'badstate'), 'sync-state.json');
+  ForceDirectories(TPath.Combine(FBase, 'badstate'));
+  TDirectory.CreateDirectory(BadStatePath);
   Engine2 := TSyncEngine.Create(FManager, FBackendRef, BadStatePath);
   Engine2Ref := Engine2;
   try

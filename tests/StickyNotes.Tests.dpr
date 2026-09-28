@@ -36,7 +36,9 @@ uses
   TSyncPersistenceTests in 'Models\TSyncPersistenceTests.pas',
   TSyncDeletionTests in 'Models\TSyncDeletionTests.pas',
   TSyncBaselineTests in 'Models\TSyncBaselineTests.pas',
-  TSyncPersistenceHardeningTests in 'Models\TSyncPersistenceHardeningTests.pas';
+  TSyncPersistenceHardeningTests in 'Models\TSyncPersistenceHardeningTests.pas',
+  TSyncReconcileTests in 'Models\TSyncReconcileTests.pas',
+  TSyncDecisionTests in 'Models\TSyncDecisionTests.pas';
 
 var
   runner: ITestRunner;

@@ -2,7 +2,7 @@ unit uSyncEngine;
 
 // Phase 7B: the reconcile engine.
 //
-// Phase 7G/WP1 foundation: the reconcile now runs from an immutable,
+// Phase 7G/WP1 foundation: the reconcile runs from an immutable,
 // main-thread-captured value snapshot, and every local mutation is applied
 // through a main-thread compare-and-set (GUID + expected Rev). The worker
 // never dereferences a live TNote: if a note changed or vanished after the
@@ -11,27 +11,24 @@ unit uSyncEngine;
 // records revisions that actually completed - never a re-read of the live
 // note.
 //
-// Reconciles the local note set against an ISyncBackend by note guid:
-//   * new local note        -> push to remote
-//   * new remote note       -> pull into the local set (with a fresh local ID)
-//   * both sides, remote rev higher -> pull (keeping device-local geometry)
-//   * both sides, local rev higher  -> push
-//   * both sides, equal rev, differing content -> keep local, write a conflict copy
-//   * locally-deleted since last sync (tracked in a small state file)
-//                           -> remove from remote so it cannot resurrect
+// Phase 7G/WP5: the reconcile decision matrix (docs/PHASE_7G_RECONCILE_DESIGN.md
+// S2/S3) replaces the legacy absence-inference behavior. In brief:
+//   * both live           -> revision comparison; equal content aligns revs;
+//                            diverged content resolves by the deterministic
+//                            winner rule (rev, then deviceId, then content
+//                            hash) with a deterministic conflict copy.
+//   * remote absent       -> never deletes: local notes are pushed, journal
+//                            entries without a remote object are dropped.
+//   * remote tombstone    -> deletes an unchanged local note ("edit beats
+//                            delete" re-publishes a locally changed one).
+//   * local absent + a durable journal entry + an unchanged remote object
+//                            -> writes a tombstone (the only deletion form).
+// The decision for one guid is a pure function of its inputs
+// (ReconcileDecision); the executor below only applies it through the WP1
+// snapshot/CAS boundary. Revs are never reset, every content-changing write
+// advances them, and repeated runs reach a fixed point that writes nothing.
 //
-// Design notes / deliberate 7B simplifications (see docs/PHASE_7_CLOUD_SYNC_DESIGN.md):
-//   * Window geometry is device-local: it is never applied from a remote note.
-//   * Ordering is by note Rev (monotonic), not by wall-clock time.
-//   * The interchange format is the canonical JSON note payload (TJsonStorage),
-//     so the local file format and the sync format can never drift apart.
-//   * Unreadable / future-schema remote payloads are skipped, never applied.
-//
-// WP1 deliberately keeps the reconcile semantics above unchanged; the WP5
-// rewrite (docs/PHASE_7G_RECONCILE_DESIGN.md) replaces them on top of this
-// snapshot + CAS foundation.
-//
-// Phase 7G/WP2: sync-state.json is now version 2 ({"version":2,"synced":...};
+// Phase 7G/WP2: sync-state.json is version 2 ({"version":2,"synced":...};
 // v1 files migrate once into the journal) and local deletions are recorded
 // durably in sync-journal.json via RecordLocalDeletion (the journal is loaded
 // on the main thread before each run).
@@ -39,7 +36,11 @@ unit uSyncEngine;
 // Phase 7G/WP3: the synced baseline is reconstructed strictly from completed
 // operations (pushed / pulled / created / verified-unchanged); deferred or
 // failed work keeps its previous baseline and is retried, and LastRunSummary
-// exposes per-run accounting for tests and WP5.
+// exposes per-run accounting.
+//
+// Phase 7G/WP4: metadata is written through uAtomicFile (unique temp file,
+// flush, atomic replace); a metadata persistence failure is surfaced and
+// marked in the run summary.
 
 interface
 
@@ -71,6 +72,54 @@ type
     Height: Integer;
   end;
 
+  // WP5: the pure reconcile inputs for one guid (design S2). All values; no
+  // I/O, no live objects.
+  TReconcileInput = record
+    Guid: string;              // the original guid (needed for the copy identity)
+    LocalPresent: Boolean;     // a live local note exists in the snapshot
+    LocalRev: Int64;
+    LocalDeviceId: string;
+    LocalSignature: string;
+    RemotePresent: Boolean;    // the remote store has an object for this guid
+    RemoteDeleted: Boolean;    // that object is a tombstone
+    RemoteRev: Int64;
+    RemoteDeviceId: string;
+    RemoteSignature: string;
+    BaselineKnown: Boolean;    // the previous baseline has an entry for the guid
+    BaselineRev: Int64;
+    JournalPresent: Boolean;   // the local deletion journal has an entry
+    JournalRev: Int64;
+  end;
+
+  // WP5: the deterministic decision for one guid (design S2/S3).
+  TSyncDecisionKind = (
+    sdkNothing,         // no action (optionally drop a stale journal entry)
+    sdkPushLocal,       // publish the local version at PublishRev
+    sdkAdoptRev,        // identical content: adopt the higher remote rev locally
+    sdkPullRemote,      // apply the remote version locally
+    sdkDeleteLocal,     // apply a remote tombstone to an unchanged local note
+    sdkWriteTombstone,  // propagate a local deletion at PublishRev
+    sdkConflictPublish, // winner is local: publish it and keep the remote loser
+    sdkConflictPull     // winner is remote: pull it and keep the local loser
+  );
+
+  TSyncDecision = record
+    Kind: TSyncDecisionKind;
+    PublishRev: Int64;    // the rev to publish; 0 when unused
+    ClearJournal: Boolean; // drop the journal entry (after a successful apply)
+    CopyGuid: string;     // deterministic conflict-copy identity ('' = none)
+    // Defensive: diverged content with no changed-side flags. Unreachable
+    // with this build; protects against same-rev content swaps from older
+    // builds - treated as a conflict and logged.
+    DefensiveWarning: Boolean;
+  end;
+
+  // WP5: the pure decision function (design S2/S3). Identical inputs produce
+  // identical decisions on every replica: no randomness, no clock, no I/O, no
+  // iteration order. Callers execute the decision through WP1's CAS boundary.
+  function ReconcileDecision(const AInput: TReconcileInput): TSyncDecision;
+
+type
   // WP3: accounting for one sync run. Counts include only operations that
   // actually completed; Deferred counts operations skipped for the next run
   // (they never advance the baseline). Succeeded means the run finished
@@ -86,7 +135,9 @@ type
     Pushed: Integer;     // local payloads accepted by the backend
     Pulled: Integer;     // remote payloads applied locally
     Created: Integer;    // of Pulled: notes newly created locally
-    Removed: Integer;    // local deletions propagated to the backend
+    Removed: Integer;    // local deletions applied from remote tombstones
+    // WP5: deletions propagated to the remote as tombstones.
+    TombstonesWritten: Integer;
     Conflicts: Integer;  // conflict resolutions performed
     Deferred: Integer;   // operations skipped for the next run
   end;
@@ -96,11 +147,13 @@ type
     FNoteManager: INoteManager;
     FBackend: ISyncBackend;
     FStatePath: string;
-    FSynced: TDictionary<string, Int64>;    // guid -> rev at last successful sync
-    FDeleted: TDictionary<string, Boolean>; // guids deleted locally since a prior sync
+    FSynced: TDictionary<string, Int64>; // guid -> rev at last successful sync
     // WP2: durable local-deletion journal (sync-journal.json, sibling of the
     // state file); the UI thread records into it while a run may be loading it.
     FJournal: TSyncJournal;
+    // WP5: this installation's device id (tombstone authorship; same source
+    // as the note storages use).
+    FDeviceId: string;
     FOnProgress: TSyncProgress;
     FOnComplete: TSyncComplete;
     // WP1: run gate and cooperative cancellation. Both fields are touched from
@@ -122,6 +175,12 @@ type
     procedure SaveState;
     function ContentSignature(const ANote: TNote): string;
     function PayloadOf(const ANote: TNote): string;
+    // WP5: the same payload with a different Rev (conflict publishing).
+    function PayloadWithRev(const APayload: string; ARev: Int64): string;
+    // WP5: the canonical tombstone payload (design S4.1).
+    function TombstonePayload(const AGuid: string; ARev: Int64; ADeletedAt: TDateTime): string;
+    // WP5: the deterministic conflict-copy payload built from the loser.
+    function ConflictCopyPayload(const ALoser: TNote; const AOrigGuid, ACopyGuid: string): string;
     function TryParse(const APayload: string): TNote;
     procedure CopySyncedFields(const ASource, ADest: TNote; AKeepGeometry: Boolean);
     // WP1 - cancellation handling. CheckCancelled raises the private
@@ -150,13 +209,12 @@ type
     // calls for the same guid never produce a second entry.
     procedure RecordLocalDeletion(const AGuid: string; ARev: Int64);
     // Phase 7G/WP1: main-thread compare-and-set entry points used by the
-    // reconcile below (and by the WP1 tests). AMutation runs on the main
-    // thread, and only if the note still exists and still has AExpectedRev.
+    // reconcile below (and by the tests). AMutation runs on the main thread,
+    // and only if the note still exists and still has AExpectedRev.
     function TryApplyNoteCAS(const AGuid: string; AExpectedRev: Int64;
       const AMutation: TProc<TNote>): TSyncApplyResult;
     // Creates a note on the main thread. With a non-empty AGuardGuid the
-    // create is skipped (deferred) if a note with that guid already exists;
-    // an empty guard marks a brand-new identity (e.g. a conflict copy).
+    // create is skipped (deferred) if a note with that guid already exists.
     function TryCreateNoteCAS(const AGuardGuid: string;
       const ACreate: TProc): TSyncApplyResult;
     property OnProgress: TSyncProgress read GetOnProgress write SetOnProgress;
@@ -169,13 +227,186 @@ type
 implementation
 
 uses
-  System.JSON, System.Classes, System.SyncObjs, System.IOUtils,
-  uJsonStorage, uSyncState, uILogger, uMainThread;
+  System.JSON, System.Classes, System.Hash, System.SyncObjs, System.IOUtils,
+  uEnums, uJsonStorage, uSyncState, uIdentity, uILogger, uMainThread;
 
 type
   // Raised by CheckCancelled to unwind a run that was cancelled. Private to
   // this unit: SyncNow catches it and reports a distinct cancellation outcome.
   ESyncCancelled = class(Exception);
+
+  // WP5: the number of deletions (applied + written) in one run above which a
+  // warn-only note is logged and appended to the completion message (design
+  // S4.3). The threshold never aborts anything.
+  TDeletionThreshold = class
+  const
+    Base = 25;
+  end;
+
+function MaxInt64(const A, B: Int64): Int64;
+begin
+  if A >= B then
+    Result := A
+  else
+    Result := B;
+end;
+
+// WP5: lowercase SHA-256 hex (RTL System.Hash; SHA-256 is the default).
+function Sha256HexLower(const AText: string): string;
+begin
+  Result := LowerCase(THashSHA2.GetHashString(AText));
+end;
+
+// WP5: the deterministic conflict-copy identity (design S3.2):
+// SHA256(origGuid + '|' + loserDeviceId + '|' + loserRev), first 16 bytes as
+// lowercase hex grouped like GenerateNoteGuid. Identical on every replica.
+function ConflictCopyGuid(const AOrigGuid, ALoserDeviceId: string;
+  ALoserRev: Int64): string;
+var
+  Hash: string;
+begin
+  Hash := Sha256HexLower(AOrigGuid + '|' + ALoserDeviceId + '|' + IntToStr(ALoserRev));
+  Result := Copy(Hash, 1, 8) + '-' + Copy(Hash, 9, 4) + '-' + Copy(Hash, 13, 4) +
+    '-' + Copy(Hash, 17, 4) + '-' + Copy(Hash, 21, 12);
+end;
+
+// WP5: the winner rule (design S3.1): Rev desc, then DeviceId desc, then
+// content hash desc. Pure string/int comparison - deterministic everywhere.
+function LocalVersionWins(ALocalRev: Int64; const ALocalDeviceId, ALocalHash: string;
+  ARemoteRev: Int64; const ARemoteDeviceId, ARemoteHash: string): Boolean;
+begin
+  if ALocalRev <> ARemoteRev then
+    Exit(ALocalRev > ARemoteRev);
+  if ALocalDeviceId <> ARemoteDeviceId then
+    Exit(ALocalDeviceId > ARemoteDeviceId);
+  Result := ALocalHash > ARemoteHash;
+end;
+
+function ReconcileDecision(const AInput: TReconcileInput): TSyncDecision;
+var
+  ChangedL, ChangedR: Boolean;
+begin
+  Result.Kind := sdkNothing;
+  Result.PublishRev := 0;
+  Result.ClearJournal := False;
+  Result.CopyGuid := '';
+  Result.DefensiveWarning := False;
+
+  // --- Remote absent (design S2.2): absence never deletes anything.
+  if not AInput.RemotePresent then
+  begin
+    if AInput.LocalPresent then
+    begin
+      Result.Kind := sdkPushLocal;
+      Result.PublishRev := AInput.LocalRev;
+    end
+    else if AInput.JournalPresent then
+      Result.ClearJournal := True; // no remote presence to delete
+    Exit;
+  end;
+
+  // --- Remote is a tombstone (design S2.3).
+  if AInput.RemoteDeleted then
+  begin
+    if not AInput.LocalPresent then
+    begin
+      if AInput.JournalPresent then
+        Result.ClearJournal := True; // the deletion is already represented remotely
+      Exit;
+    end;
+    ChangedL := (not AInput.BaselineKnown) or (AInput.LocalRev > AInput.BaselineRev);
+    if (not ChangedL) and AInput.BaselineKnown and
+       (AInput.RemoteRev > AInput.BaselineRev) then
+    begin
+      // The local note is unchanged since the common state: apply the deletion.
+      Result.Kind := sdkDeleteLocal;
+    end
+    else
+    begin
+      // Edit beats delete (locally changed, baseline unknown, or a stale
+      // tombstone that predates the common state).
+      Result.Kind := sdkPushLocal;
+      Result.PublishRev := MaxInt64(AInput.LocalRev, AInput.RemoteRev) + 1;
+    end;
+    Exit;
+  end;
+
+  // --- Local absent, remote live (design S2.4).
+  if not AInput.LocalPresent then
+  begin
+    if AInput.JournalPresent then
+    begin
+      if AInput.BaselineKnown and (AInput.RemoteRev = AInput.BaselineRev) then
+      begin
+        // The remote is unchanged since the common state: propagate the
+        // deletion as a tombstone.
+        Result.Kind := sdkWriteTombstone;
+        Result.PublishRev := MaxInt64(AInput.RemoteRev, AInput.JournalRev) + 1;
+        Result.ClearJournal := True;
+      end
+      else
+      begin
+        // Edit beats delete: the remote changed since the common state (or the
+        // baseline is unknown); the note returns locally.
+        Result.Kind := sdkPullRemote;
+        Result.ClearJournal := True;
+      end;
+    end
+    else
+      Result.Kind := sdkPullRemote; // a new remote note
+    Exit;
+  end;
+
+  // --- Both sides live (design S2.1).
+  if AInput.LocalSignature = AInput.RemoteSignature then
+  begin
+    if AInput.LocalRev = AInput.RemoteRev then
+      Exit; // already synchronized: no-op
+    if AInput.LocalRev > AInput.RemoteRev then
+    begin
+      Result.Kind := sdkPushLocal; // bring the remote up to the local rev
+      Result.PublishRev := AInput.LocalRev;
+    end
+    else
+      Result.Kind := sdkAdoptRev; // identical content: adopt the higher rev
+    Exit;
+  end;
+
+  ChangedL := (not AInput.BaselineKnown) or (AInput.LocalRev > AInput.BaselineRev);
+  ChangedR := (not AInput.BaselineKnown) or (AInput.RemoteRev > AInput.BaselineRev);
+  if ChangedL and (not ChangedR) then
+  begin
+    Result.Kind := sdkPushLocal;
+    Result.PublishRev := AInput.LocalRev;
+    Exit;
+  end;
+  if ChangedR and (not ChangedL) then
+  begin
+    Result.Kind := sdkPullRemote;
+    Exit;
+  end;
+
+  // --- Conflict (both changed, baseline unknown, or the defensive row).
+  Result.DefensiveWarning := (not ChangedL) and (not ChangedR);
+  if LocalVersionWins(AInput.LocalRev, AInput.LocalDeviceId,
+       Sha256HexLower(AInput.LocalSignature),
+       AInput.RemoteRev, AInput.RemoteDeviceId,
+       Sha256HexLower(AInput.RemoteSignature)) then
+  begin
+    Result.Kind := sdkConflictPublish;
+    Result.PublishRev := MaxInt64(AInput.LocalRev, AInput.RemoteRev) + 1;
+    // The loser is the remote version; preserve it under the deterministic
+    // identity derived from the loser's device id and revision.
+    Result.CopyGuid := ConflictCopyGuid(AInput.Guid, AInput.RemoteDeviceId,
+      AInput.RemoteRev);
+  end
+  else
+  begin
+    Result.Kind := sdkConflictPull;
+    Result.CopyGuid := ConflictCopyGuid(AInput.Guid, AInput.LocalDeviceId,
+      AInput.LocalRev);
+  end;
+end;
 
 { TSyncEngine }
 
@@ -189,13 +420,16 @@ begin
   FBackend := ABackend;
   FStatePath := AStateFilePath;
   FSynced := TDictionary<string, Int64>.Create;
-  FDeleted := TDictionary<string, Boolean>.Create;
   FSyncActive := 0;
   FCancelRequested := 0;
   // WP2: the journal lives next to the state file (design S4.2).
+  // WP5: the device id (tombstone authorship) comes from the same profile.
   JournalPath := '';
   if FStatePath <> '' then
+  begin
     JournalPath := TPath.Combine(TPath.GetDirectoryName(FStatePath), 'sync-journal.json');
+    FDeviceId := GetOrCreateDeviceId(TPath.GetDirectoryName(FStatePath));
+  end;
   FJournal := TSyncJournal.Create(JournalPath);
 end;
 
@@ -203,7 +437,6 @@ destructor TSyncEngine.Destroy;
 begin
   FJournal.Free;
   FSynced.Free;
-  FDeleted.Free;
   inherited;
 end;
 
@@ -428,9 +661,7 @@ var
 begin
   // WP2: version-2 state (with a one-time v1 -> v2 migration into the
   // journal). A file that cannot be used raises - the run then aborts instead
-  // of silently treating synchronized metadata as empty. FDeleted is
-  // runtime-only in v2 and deliberately keeps accumulating for the engine's
-  // lifetime (its in-file role has moved to the journal).
+  // of silently treating synchronized metadata as empty.
   Loaded := LoadSyncState(FStatePath, FJournal);
   FSynced.Free;
   FSynced := Loaded;
@@ -469,6 +700,65 @@ begin
     Result := Json.ToJSON;
   finally
     Json.Free;
+  end;
+end;
+
+function TSyncEngine.PayloadWithRev(const APayload: string; ARev: Int64): string;
+var
+  Note: TNote;
+begin
+  Result := '';
+  Note := TryParse(APayload);
+  if Note = nil then Exit;
+  try
+    Note.Rev := ARev;
+    Result := PayloadOf(Note);
+  finally
+    Note.Free;
+  end;
+end;
+
+function TSyncEngine.TombstonePayload(const AGuid: string; ARev: Int64;
+  ADeletedAt: TDateTime): string;
+var
+  Tomb: TNote;
+begin
+  // Design S4.1: canonical note payload with Deleted = true and empty content.
+  Tomb := TNote.Create(1, '', '', ncYellow);
+  try
+    Tomb.Guid := AGuid;
+    Tomb.Rev := ARev;
+    Tomb.DeviceId := FDeviceId;
+    Tomb.Deleted := True;
+    Tomb.DeletedAt := ADeletedAt;
+    Tomb.CreatedAt := ADeletedAt;
+    Tomb.UpdatedAt := ADeletedAt;
+    Result := PayloadOf(Tomb);
+  finally
+    Tomb.Free;
+  end;
+end;
+
+function TSyncEngine.ConflictCopyPayload(const ALoser: TNote;
+  const AOrigGuid, ACopyGuid: string): string;
+var
+  Copy: TNote;
+begin
+  // Design S3.2: the loser's synced fields under the deterministic identity;
+  // every field here is a pure function of the loser, so both replicas build
+  // byte-identical payloads.
+  Copy := TNote.Create(1, '', '', ncYellow);
+  try
+    CopySyncedFields(ALoser, Copy, True);
+    Copy.Title := ALoser.Title + ' (conflict from ' +
+      System.Copy(ALoser.DeviceId, 1, 8) + ')';
+    Copy.Guid := ACopyGuid;
+    Copy.Rev := ALoser.Rev;
+    Copy.DeviceId := ALoser.DeviceId;
+    Copy.ConflictOf := AOrigGuid;
+    Result := PayloadOf(Copy);
+  finally
+    Copy.Free;
   end;
 end;
 
@@ -533,16 +823,24 @@ var
   RemoteSet: TDictionary<string, Boolean>;
   DeferredGuids: TDictionary<string, Boolean>;
   AppliedPulls: TDictionary<string, Int64>;
-  CreatedGuids: TDictionary<string, Int64>; // WP3: guid -> applied remote rev
+  PushedRevs: TDictionary<string, Int64>;
+  CreatedGuids: TDictionary<string, Int64>;      // WP3: guid -> applied rev
+  ResolvedDeletions: TDictionary<string, Int64>; // WP5: guid -> tombstone/applied rev
+  PendingTombstones: TDictionary<string, Boolean>; // WP5: deferred tombstone writes
   NewSynced: TDictionary<string, Int64>;
   RemoteNames: TArray<string>;
-  Guid, Payload, RemoteETag: string;
+  Guid, Payload, RemoteETag, Msg: string;
   UseETags: Boolean;
   Snap: TSyncNoteSnapshot;
-  RemoteNote: TNote;
-  LocalRev, RemoteRev, AppliedRev, PreviousRev: Int64;
-  Pushed, Pulled, Created, Conflicts, Removed, Deferred: Integer;
+  RemoteNote, RemoteNote2: TNote;
+  LocalRev, RemoteRev, PreviousRev, AppliedRev: Int64;
+  Pushed, Pulled, Created, Conflicts, Removed, TombstonesWritten, DeletedTotal,
+    Deferred, Threshold: Integer;
   ApplyResult: TSyncApplyResult;
+  JournalChanged: Boolean;
+  JournalTomb: TSyncTombstone;
+  ReconcileCtx: TReconcileInput;
+  Decision: TSyncDecision;
   Logger: ILogger;
 
   // WP1: verify (on the main thread) that the live note still exists and still
@@ -556,12 +854,78 @@ var
       end);
   end;
 
+  procedure MarkDeferred(const AGuid: string);
+  begin
+    Inc(Deferred);
+    DeferredGuids.AddOrSetValue(AGuid, True);
+  end;
+
+  procedure ClearJournalEntry(const AGuid: string);
+  begin
+    FJournal.Remove(AGuid);
+    JournalChanged := True;
+  end;
+
+  // WP5: ensure the deterministic conflict copy exists locally and remotely;
+  // creation is idempotent (create-if-absent + If-None-Match) so repeated
+  // reconciliation never produces a second copy.
+  procedure EnsureConflictCopy(const AOrigGuid, ACopyGuid, ALoserDeviceId: string;
+    ALoserRev: Int64; ALoser: TNote);
+  begin
+    if ACopyGuid = '' then Exit;
+    if RemoteSet.ContainsKey(ACopyGuid) then Exit;      // already on the remote
+    if CreatedGuids.ContainsKey(ACopyGuid) then Exit;   // created earlier in this run
+    ApplyResult := TryCreateNoteCAS(ACopyGuid,
+      procedure
+      var
+        NewCopy: TNote;
+      begin
+        NewCopy := FNoteManager.CreateNote(
+          ALoser.Title, ALoser.Content, ALoser.Color, Snap.Left + 30, Snap.Top + 30,
+          Snap.Width, Snap.Height, ALoser.AlwaysOnTop);
+        CopySyncedFields(ALoser, NewCopy, True); // keep the +30 offset geometry
+        // The deterministic title suffix must be applied AFTER CopySyncedFields
+        // (mirroring ConflictCopyPayload exactly): otherwise the local copy's
+        // signature would differ from the pushed payload's and the copy would
+        // re-resolve as a phantom conflict on the next run.
+        NewCopy.Title := ALoser.Title + ' (conflict from ' +
+          System.Copy(ALoserDeviceId, 1, 8) + ')';
+        NewCopy.Guid := ACopyGuid;
+        NewCopy.Rev := ALoserRev;
+        NewCopy.DeviceId := ALoserDeviceId;
+        NewCopy.ConflictOf := AOrigGuid;
+        FNoteManager.PersistNote(NewCopy);
+      end);
+    case ApplyResult of
+      arCancelled: raise ESyncCancelled.Create('Sync run cancelled');
+      arApplied:
+        begin
+          // Push it now so the pair converges in this run when possible; a
+          // failed push defers and the next run's push loop retries.
+          CheckCancelled;
+          Payload := ConflictCopyPayload(ALoser, AOrigGuid, ACopyGuid);
+          if (Payload <> '') and
+             ((not UseETags) or FBackend.WriteIfMatch(ACopyGuid, Payload, '')) then
+            CreatedGuids.AddOrSetValue(ACopyGuid, ALoserRev)
+          else
+          begin
+            Inc(Deferred);
+            Logger.Warning('Sync: conflict copy ' + ACopyGuid +
+              ' could not be pushed yet; retrying next run');
+          end;
+        end
+    else
+      Inc(Deferred); // the guid is already present; the normal paths reconcile it
+    end;
+  end;
+
 begin
   Result := False;
   Logger := CreateLogger;
   // WP3: zero the counters up front so the run accounting is meaningful on
   // every exit path (success, cancellation, failure).
-  Pushed := 0; Pulled := 0; Created := 0; Conflicts := 0; Removed := 0; Deferred := 0;
+  Pushed := 0; Pulled := 0; Created := 0; Conflicts := 0; Removed := 0;
+  TombstonesWritten := 0; Deferred := 0;
   FLastRunSummary := Default(TSyncRunSummary);
   if FBackend = nil then
   begin
@@ -580,16 +944,24 @@ begin
   try
     try
       ClearCancel;
+      JournalChanged := False;
       Snapshot := TDictionary<string, TSyncNoteSnapshot>.Create;
       DeferredGuids := TDictionary<string, Boolean>.Create;
       AppliedPulls := TDictionary<string, Int64>.Create;
+      PushedRevs := TDictionary<string, Int64>.Create;
       CreatedGuids := TDictionary<string, Int64>.Create;
+      ResolvedDeletions := TDictionary<string, Int64>.Create;
+      PendingTombstones := TDictionary<string, Boolean>.Create;
       try
         UseETags := FBackend.SupportsETags;
         LoadJournalOnMainThread; // main-thread parse (WP2 S16); fails the run if unreadable
         LoadState;
         Report('Scanning local notes...', 10);
         CaptureSnapshot(Snapshot); // main thread; worker never sees a live TNote
+        if (Snapshot.Count = 0) and (FSynced.Count > 0) then
+          Logger.Warning(Format(
+            'Sync: the local note set is empty while the synced baseline knows %d notes; pulling only, not deleting',
+            [FSynced.Count]));
         RemoteSet := TDictionary<string, Boolean>.Create;
         try
           CheckCancelled; // before the first backend call
@@ -597,25 +969,28 @@ begin
           for Guid in RemoteNames do
             RemoteSet.AddOrSetValue(Guid, True);
 
-          // Propagate local deletions FIRST: a guid we synced before, that is
-          // no longer present locally and not already tombstoned, was deleted
-          // here. Running this before the pull loop is what stops the remote
-          // copy from resurrecting the note.
-          for Guid in FSynced.Keys do
+          // WP5: stale-journal sweep (design S4.2). A journal entry for a note
+          // that is alive locally, or that has no remote presence at all, is
+          // dropped; entries whose remote object still exists are processed
+          // below under the S2.4 rules.
+          for JournalTomb in FJournal.Enumerate do
           begin
             CheckCancelled;
-            if Snapshot.ContainsKey(Guid) then Continue;
-            if FDeleted.ContainsKey(Guid) then Continue;
-            FDeleted.AddOrSetValue(Guid, True);
-            CheckCancelled; // immediately before the backend call
-            FBackend.Remove(Guid);
-            Inc(Removed);
+            Guid := JournalTomb.Guid;
+            if Snapshot.ContainsKey(Guid) then
+            begin
+              ClearJournalEntry(Guid);
+              Logger.Warning('Sync: dropped a stale deletion journal entry for a live note');
+            end
+            else if not RemoteSet.ContainsKey(Guid) then
+              ClearJournalEntry(Guid);
           end;
 
-          Report('Pulling remote changes...', 40);
+          Report('Reconciling remote changes...', 40);
           for Guid in RemoteNames do
           begin
             CheckCancelled;
+            if CreatedGuids.ContainsKey(Guid) then Continue; // created earlier in this run
             if UseETags then
               Payload := FBackend.ReadWithETag(Guid, RemoteETag)
             else
@@ -627,156 +1002,273 @@ begin
             RemoteNote := TryParse(Payload);
             if RemoteNote = nil then Continue; // never act on unreadable remote data
             try
-              RemoteRev := RemoteNote.Rev;
-
-              // Locally-known deletion wins: keep it from resurrecting remotely.
-              if FDeleted.ContainsKey(Guid) then
+              // Build the immutable inputs and let the pure decision function
+              // (design S2/S3) determine the outcome.
+              ReconcileCtx := Default(TReconcileInput);
+              ReconcileCtx.Guid := Guid;
+              ReconcileCtx.LocalPresent := Snapshot.TryGetValue(Guid, Snap);
+              if ReconcileCtx.LocalPresent then
               begin
-                CheckCancelled;
-                FBackend.Remove(Guid);
-                Inc(Removed);
-                Continue;
+                ReconcileCtx.LocalRev := Snap.Rev;
+                ReconcileCtx.LocalDeviceId := Snap.DeviceId;
+                ReconcileCtx.LocalSignature := Snap.Signature;
               end;
+              ReconcileCtx.RemotePresent := True;
+              ReconcileCtx.RemoteDeleted := RemoteNote.Deleted;
+              ReconcileCtx.RemoteRev := RemoteNote.Rev;
+              ReconcileCtx.RemoteDeviceId := RemoteNote.DeviceId;
+              ReconcileCtx.RemoteSignature := ContentSignature(RemoteNote);
+              ReconcileCtx.BaselineKnown := FSynced.TryGetValue(Guid, PreviousRev);
+              ReconcileCtx.BaselineRev := PreviousRev;
+              ReconcileCtx.JournalPresent := FJournal.TryGet(Guid, JournalTomb);
+              ReconcileCtx.JournalRev := JournalTomb.Rev;
+              Decision := ReconcileDecision(ReconcileCtx);
+              if Decision.DefensiveWarning then
+                Logger.Warning('Sync: ' + Guid +
+                  ' diverged without changed-side flags; resolving defensively');
 
-              if not Snapshot.TryGetValue(Guid, Snap) then
-              begin
-                // New remote note -> materialise locally with a fresh local ID,
-                // returning a Created window (consistent with the app's model).
-                ApplyResult := TryCreateNoteCAS(Guid,
-                  procedure
-                  var
-                    Created: TNote;
+              LocalRev := ReconcileCtx.LocalRev;
+              RemoteRev := ReconcileCtx.RemoteRev;
+              case Decision.Kind of
+                sdkNothing:
                   begin
-                    Created := FNoteManager.CreateNote(RemoteNote.Title, RemoteNote.Content,
-                      RemoteNote.Color, RemoteNote.Left, RemoteNote.Top, RemoteNote.Width,
-                      RemoteNote.Height, RemoteNote.AlwaysOnTop);
-                    CopySyncedFields(RemoteNote, Created, False);
-                    FNoteManager.PersistNote(Created);
-                  end);
-                case ApplyResult of
-                  arApplied:
-                    begin
-                      // WP3: a created note is an applied operation - its
-                      // baseline advances to the applied remote revision
-                      // (design S2.4).
-                      Inc(Pulled);
-                      Inc(Created);
-                      CreatedGuids.AddOrSetValue(Guid, RemoteRev);
-                    end;
-                  arCancelled: raise ESyncCancelled.Create('Sync run cancelled');
-                else
-                  Inc(Deferred);
-                end;
-                Continue;
-              end;
-
-              LocalRev := Snap.Rev; // from the snapshot, never from the live note
-              if RemoteRev > LocalRev then
-              begin
-                // Apply the pull through the CAS gate: if the user edited this
-                // note while the run was in flight, the apply is skipped and
-                // the next run reconciles the newer revision.
-                ApplyResult := TryApplyNoteCAS(Guid, Snap.Rev,
-                  procedure(Note: TNote)
-                  begin
-                    CopySyncedFields(RemoteNote, Note, True); // keep local geometry
-                    FNoteManager.PersistNote(Note);
-                  end);
-                case ApplyResult of
-                  arApplied:
-                    begin
-                      Inc(Pulled);
-                      AppliedPulls.AddOrSetValue(Guid, RemoteRev);
-                    end;
-                  arCancelled: raise ESyncCancelled.Create('Sync run cancelled');
-                else
-                  begin
-                    Inc(Deferred);
-                    DeferredGuids.AddOrSetValue(Guid, True);
+                    if Decision.ClearJournal then
+                      ClearJournalEntry(Guid);
                   end;
-                end;
-              end
-              else if RemoteRev < LocalRev then
-              begin
-                // Do not push a snapshot the user has since changed or deleted:
-                // verify on the main thread first, then do the backend write.
-                ApplyResult := ValidateNoteCAS;
-                if ApplyResult = arCancelled then
-                  raise ESyncCancelled.Create('Sync run cancelled');
-                if ApplyResult <> arApplied then
-                begin
-                  Inc(Deferred);
-                  DeferredGuids.AddOrSetValue(Guid, True);
-                  Logger.Warning('Sync: ' + Guid + ' changed locally during sync; push deferred');
-                  Continue;
-                end;
-                CheckCancelled;
-                if (not UseETags) or FBackend.WriteIfMatch(Guid, Snap.Payload, RemoteETag) then
-                  Inc(Pushed)
-                else
-                begin
-                  // The remote changed underneath us between read and write;
-                  // make no destructive move - the next run re-reads and
-                  // reconciles.
-                  Inc(Conflicts);
-                  Inc(Deferred);
-                  DeferredGuids.AddOrSetValue(Guid, True);
-                  Logger.Warning('Sync: remote ' + Guid + ' changed during sync; deferring to next run');
-                end;
-              end
-              else if Snap.Signature <> ContentSignature(RemoteNote) then
-              begin
-                // Equal revision, diverged content: keep local, never lose the
-                // remote edit - preserve it as a visible conflict copy.
-                ApplyResult := TryCreateNoteCAS('',
-                  procedure
-                  var
-                    ConflictNote: TNote;
+
+                sdkDeleteLocal:
                   begin
-                    ConflictNote := FNoteManager.CreateNote(
-                      Snap.Title + ' (conflict from ' + Copy(RemoteNote.DeviceId, 1, 8) + ')',
-                      RemoteNote.Content, RemoteNote.Color, Snap.Left + 30, Snap.Top + 30,
-                      Snap.Width, Snap.Height, False);
-                    CopySyncedFields(RemoteNote, ConflictNote, False);
-                    ConflictNote.Guid := ''; // a NEW note, not the same identity
-                    ConflictNote.Rev := 1;
-                    ConflictNote.ConflictOf := Snap.Guid; // Phase 7C: mark it resolvable
-                    FNoteManager.PersistNote(ConflictNote);
-                  end);
-                if ApplyResult = arCancelled then
-                  raise ESyncCancelled.Create('Sync run cancelled');
-                if ApplyResult <> arApplied then
-                begin
-                  Inc(Deferred);
-                  DeferredGuids.AddOrSetValue(Guid, True);
-                end;
-                // Rewrite the remote with the kept local version - but only if
-                // the local note still matches the snapshot.
-                ApplyResult := ValidateNoteCAS;
-                if ApplyResult = arCancelled then
-                  raise ESyncCancelled.Create('Sync run cancelled');
-                if ApplyResult <> arApplied then
-                begin
-                  Inc(Deferred);
-                  DeferredGuids.AddOrSetValue(Guid, True);
-                  Logger.Warning('Sync: ' + Guid + ' changed locally during sync; remote rewrite deferred');
-                end
-                else
-                begin
-                  CheckCancelled;
-                  if UseETags then
+                    // Apply the remote tombstone to the unchanged local note
+                    // through the CAS gate.
+                    ApplyResult := TryApplyNoteCAS(Guid, Snap.Rev,
+                      procedure(Note: TNote)
+                      begin
+                        FNoteManager.DeleteNote(Note.ID);
+                      end);
+                    case ApplyResult of
+                      arApplied:
+                        begin
+                          Inc(Removed);
+                          ResolvedDeletions.AddOrSetValue(Guid, RemoteRev);
+                        end;
+                      arCancelled: raise ESyncCancelled.Create('Sync run cancelled');
+                    else
+                      MarkDeferred(Guid);
+                    end;
+                  end;
+
+                sdkPullRemote:
                   begin
-                    if not FBackend.WriteIfMatch(Guid, Snap.Payload, RemoteETag) then
+                    if not ReconcileCtx.LocalPresent then
+                    begin
+                      // A new remote note (or the edit-beats-delete return):
+                      // materialise it locally with a fresh local id.
+                      ApplyResult := TryCreateNoteCAS(Guid,
+                        procedure
+                        var
+                          PulledNote: TNote;
+                        begin
+                          PulledNote := FNoteManager.CreateNote(RemoteNote.Title,
+                            RemoteNote.Content, RemoteNote.Color, RemoteNote.Left,
+                            RemoteNote.Top, RemoteNote.Width, RemoteNote.Height,
+                            RemoteNote.AlwaysOnTop);
+                          CopySyncedFields(RemoteNote, PulledNote, False);
+                          FNoteManager.PersistNote(PulledNote);
+                        end);
+                      case ApplyResult of
+                        arApplied:
+                          begin
+                            Inc(Pulled);
+                            Inc(Created);
+                            CreatedGuids.AddOrSetValue(Guid, RemoteRev);
+                            if Decision.ClearJournal and ReconcileCtx.JournalPresent then
+                              ClearJournalEntry(Guid);
+                          end;
+                        arCancelled: raise ESyncCancelled.Create('Sync run cancelled');
+                      else
+                        MarkDeferred(Guid);
+                      end;
+                      Continue;
+                    end;
+                    // Apply the remote version to the existing note; a raced
+                    // local edit defers the whole row (including any journal
+                    // clearing).
+                    ApplyResult := TryApplyNoteCAS(Guid, Snap.Rev,
+                      procedure(Note: TNote)
+                      begin
+                        CopySyncedFields(RemoteNote, Note, True); // keep local geometry
+                        FNoteManager.PersistNote(Note);
+                      end);
+                    case ApplyResult of
+                      arApplied:
+                        begin
+                          Inc(Pulled);
+                          AppliedPulls.AddOrSetValue(Guid, RemoteRev);
+                          if Decision.ClearJournal and ReconcileCtx.JournalPresent then
+                            ClearJournalEntry(Guid);
+                        end;
+                      arCancelled: raise ESyncCancelled.Create('Sync run cancelled');
+                    else
+                      MarkDeferred(Guid);
+                    end;
+                  end;
+
+                sdkPushLocal:
+                  begin
+                    // Do not push a snapshot the user has since changed: verify
+                    // on the main thread first, then do the backend write.
+                    ApplyResult := ValidateNoteCAS;
+                    if ApplyResult = arCancelled then
+                      raise ESyncCancelled.Create('Sync run cancelled');
+                    if ApplyResult <> arApplied then
+                    begin
+                      MarkDeferred(Guid);
+                      Logger.Warning('Sync: ' + Guid + ' changed locally during sync; push deferred');
+                      Continue;
+                    end;
+                    CheckCancelled;
+                    if Decision.PublishRev <> Snap.Rev then
+                      Payload := PayloadWithRev(Snap.Payload, Decision.PublishRev)
+                    else
+                      Payload := Snap.Payload;
+                    if (Payload <> '') and ((not UseETags) or
+                       FBackend.WriteIfMatch(Guid, Payload, RemoteETag)) then
+                    begin
+                      Inc(Pushed);
+                      PushedRevs.AddOrSetValue(Guid, Decision.PublishRev);
+                      if Decision.PublishRev <> Snap.Rev then
+                      begin
+                        // Keep the local rev in step with the published one
+                        // (edit beats delete / aligned publications).
+                        ApplyResult := TryApplyNoteCAS(Guid, Snap.Rev,
+                          procedure(Note: TNote)
+                          begin
+                            Note.Rev := Decision.PublishRev;
+                            FNoteManager.PersistNote(Note);
+                          end);
+                        if ApplyResult = arCancelled then
+                          raise ESyncCancelled.Create('Sync run cancelled');
+                      end;
+                    end
+                    else
+                    begin
+                      MarkDeferred(Guid);
+                      Logger.Warning('Sync: remote ' + Guid + ' changed during sync; deferring to next run');
+                    end;
+                  end;
+
+                sdkAdoptRev:
+                  begin
+                    // Identical content, the remote carries the higher rev.
+                    ApplyResult := TryApplyNoteCAS(Guid, Snap.Rev,
+                      procedure(Note: TNote)
+                      begin
+                        Note.Rev := RemoteRev;
+                        FNoteManager.PersistNote(Note);
+                      end);
+                    case ApplyResult of
+                      arApplied: AppliedPulls.AddOrSetValue(Guid, RemoteRev);
+                      arCancelled: raise ESyncCancelled.Create('Sync run cancelled');
+                    else
+                      MarkDeferred(Guid);
+                    end;
+                  end;
+
+                sdkWriteTombstone:
+                  begin
+                    // Propagate the local deletion (design S2.4/S4.1). A failed
+                    // write keeps the journal entry for the next run.
+                    CheckCancelled;
+                    Payload := TombstonePayload(Guid, Decision.PublishRev,
+                      JournalTomb.DeletedAt);
+                    if (Payload <> '') and ((not UseETags) or
+                       FBackend.WriteIfMatch(Guid, Payload, RemoteETag)) then
+                    begin
+                      Inc(TombstonesWritten);
+                      ResolvedDeletions.AddOrSetValue(Guid, Decision.PublishRev);
+                      ClearJournalEntry(Guid);
+                    end
+                    else
                     begin
                       Inc(Deferred);
-                      DeferredGuids.AddOrSetValue(Guid, True);
-                      Logger.Warning('Sync: remote ' + Guid + ' changed during sync; conflict copy kept, remote rewrite deferred');
+                      PendingTombstones.AddOrSetValue(Guid, True);
+                      Logger.Warning('Sync: tombstone for ' + Guid +
+                        ' could not be written yet; retrying next run');
                     end;
-                  end
-                  else
-                    FBackend.Write(Guid, Snap.Payload);
-                end;
-                Inc(Conflicts);
+                  end;
+
+                sdkConflictPublish:
+                  begin
+                    // Winner is the local version: publish it at R* and keep
+                    // the remote loser under the deterministic copy identity.
+                    ApplyResult := ValidateNoteCAS;
+                    if ApplyResult = arCancelled then
+                      raise ESyncCancelled.Create('Sync run cancelled');
+                    if ApplyResult <> arApplied then
+                    begin
+                      MarkDeferred(Guid);
+                      Logger.Warning('Sync: ' + Guid + ' changed locally during sync; conflict publish deferred');
+                      Continue;
+                    end;
+                    CheckCancelled;
+                    Payload := PayloadWithRev(Snap.Payload, Decision.PublishRev);
+                    if (Payload <> '') and ((not UseETags) or
+                       FBackend.WriteIfMatch(Guid, Payload, RemoteETag)) then
+                    begin
+                      Inc(Pushed);
+                      Inc(Conflicts);
+                      PushedRevs.AddOrSetValue(Guid, Decision.PublishRev);
+                      ApplyResult := TryApplyNoteCAS(Guid, Snap.Rev,
+                        procedure(Note: TNote)
+                        begin
+                          Note.Rev := Decision.PublishRev; // content unchanged
+                          FNoteManager.PersistNote(Note);
+                        end);
+                      if ApplyResult = arCancelled then
+                        raise ESyncCancelled.Create('Sync run cancelled');
+                      EnsureConflictCopy(Guid, Decision.CopyGuid,
+                        RemoteNote.DeviceId, RemoteRev, RemoteNote);
+                    end
+                    else
+                    begin
+                      MarkDeferred(Guid);
+                      Logger.Warning('Sync: remote ' + Guid +
+                        ' changed during sync; conflict publish deferred');
+                    end;
+                  end;
+
+                sdkConflictPull:
+                  begin
+                    // Winner is the remote version: pull it and keep the local
+                    // loser under the deterministic copy identity.
+                    ApplyResult := TryApplyNoteCAS(Guid, Snap.Rev,
+                      procedure(Note: TNote)
+                      begin
+                        CopySyncedFields(RemoteNote, Note, True); // keep local geometry
+                        FNoteManager.PersistNote(Note);
+                      end);
+                    case ApplyResult of
+                      arApplied:
+                        begin
+                          Inc(Pulled);
+                          Inc(Conflicts);
+                          AppliedPulls.AddOrSetValue(Guid, RemoteRev);
+                          // The loser is the local version; parse its snapshot
+                          // payload to build the copy from values only.
+                          RemoteNote2 := TryParse(Snap.Payload);
+                          try
+                            if RemoteNote2 <> nil then
+                              EnsureConflictCopy(Guid, Decision.CopyGuid,
+                                Snap.DeviceId, LocalRev, RemoteNote2);
+                          finally
+                            RemoteNote2.Free;
+                          end;
+                        end;
+                      arCancelled: raise ESyncCancelled.Create('Sync run cancelled');
+                    else
+                      MarkDeferred(Guid);
+                    end;
+                  end;
               end;
             finally
               RemoteNote.Free;
@@ -787,7 +1279,15 @@ begin
           for Snap in Snapshot.Values do
           begin
             CheckCancelled;
-            if RemoteSet.ContainsKey(Snap.Guid) then Continue; // already handled above
+            if RemoteSet.ContainsKey(Snap.Guid) then Continue; // handled above
+            ReconcileCtx := Default(TReconcileInput);
+            ReconcileCtx.Guid := Snap.Guid;
+            ReconcileCtx.LocalPresent := True;
+            ReconcileCtx.LocalRev := Snap.Rev;
+            ReconcileCtx.LocalDeviceId := Snap.DeviceId;
+            ReconcileCtx.LocalSignature := Snap.Signature;
+            Decision := ReconcileDecision(ReconcileCtx);
+            if Decision.Kind <> sdkPushLocal then Continue;
             // Verify the note still matches the snapshot, then write it as a
             // new object (If-None-Match: *) so we never clobber one created
             // remotely or locally mid-sync.
@@ -796,19 +1296,19 @@ begin
               raise ESyncCancelled.Create('Sync run cancelled');
             if ApplyResult <> arApplied then
             begin
-              Inc(Deferred);
-              DeferredGuids.AddOrSetValue(Snap.Guid, True);
+              MarkDeferred(Snap.Guid);
               Logger.Warning('Sync: ' + Snap.Guid + ' changed locally during sync; push deferred');
               Continue;
             end;
-            CheckCancelled; // immediately before the backend call
+            CheckCancelled;
             if (not UseETags) or FBackend.WriteIfMatch(Snap.Guid, Snap.Payload, '') then
-              Inc(Pushed)
+            begin
+              Inc(Pushed);
+              PushedRevs.AddOrSetValue(Snap.Guid, Decision.PublishRev);
+            end
             else
             begin
-              Inc(Conflicts);
-              Inc(Deferred);
-              DeferredGuids.AddOrSetValue(Snap.Guid, True);
+              MarkDeferred(Snap.Guid);
               Logger.Warning('Sync: ' + Snap.Guid + ' appeared remotely during sync; deferring to next run');
             end;
           end;
@@ -826,15 +1326,26 @@ begin
                 if FSynced.TryGetValue(Snap.Guid, PreviousRev) then
                   NewSynced.AddOrSetValue(Snap.Guid, PreviousRev);
               end
+              else if PushedRevs.TryGetValue(Snap.Guid, AppliedRev) then
+                NewSynced.AddOrSetValue(Snap.Guid, AppliedRev)
               else if AppliedPulls.TryGetValue(Snap.Guid, AppliedRev) then
                 NewSynced.AddOrSetValue(Snap.Guid, AppliedRev)
               else
                 NewSynced.AddOrSetValue(Snap.Guid, Snap.Rev);
             end;
-            // WP3: notes created from the remote are applied operations too -
-            // their baseline advances to the applied remote revision.
+            // Notes created from the remote (and deterministic conflict
+            // copies) are applied operations: their baseline advances to the
+            // applied revision.
             for Guid in CreatedGuids.Keys do
               NewSynced.AddOrSetValue(Guid, CreatedGuids[Guid]);
+            // Deletions resolved this run (tombstones written / applied) are
+            // recorded at the resolved revision.
+            for Guid in ResolvedDeletions.Keys do
+              NewSynced.AddOrSetValue(Guid, ResolvedDeletions[Guid]);
+            // Deferred tombstone writes keep their previous baseline.
+            for Guid in PendingTombstones.Keys do
+              if FSynced.TryGetValue(Guid, PreviousRev) then
+                NewSynced.AddOrSetValue(Guid, PreviousRev);
             FSynced.Free;
             FSynced := NewSynced;
             NewSynced := nil;
@@ -842,11 +1353,14 @@ begin
             NewSynced.Free;
           end;
 
-          // WP4: persist the metadata. A failure here is distinguishable from
-          // an operation failure: the run still reports failed, and
-          // MetadataFailed marks that the operations themselves had completed
-          // and only the metadata write was lost (the old file was preserved).
+          // WP4: persist the metadata (journal changes first: deletion
+          // information must land before the state rewrite). A failure here is
+          // distinguishable from an operation failure: the run still reports
+          // failed, and MetadataFailed marks that the operations themselves
+          // had completed and only the metadata write was lost.
           try
+            if JournalChanged then
+              FJournal.Save;
             SaveState;
           except
             FLastRunSummary.MetadataFailed := True;
@@ -863,27 +1377,40 @@ begin
           FLastRunSummary.Pulled := Pulled;
           FLastRunSummary.Created := Created;
           FLastRunSummary.Removed := Removed;
+          FLastRunSummary.TombstonesWritten := TombstonesWritten;
           FLastRunSummary.Conflicts := Conflicts;
           FLastRunSummary.Deferred := Deferred;
-          Logger.Info(Format('Sync: pushed %d, pulled %d, conflicts %d, removed %d, deferred %d',
-            [Pushed, Pulled, Conflicts, Removed, Deferred]));
+          Logger.Info(Format('Sync: pushed %d, pulled %d, conflicts %d, removed %d, tombstones %d, deferred %d',
+            [Pushed, Pulled, Conflicts, Removed, TombstonesWritten, Deferred]));
           if Assigned(FOnComplete) then
           begin
-            // A partial run (anything skipped or deferred) must say so.
+            // WP5 (design S4.3): a run that exceeds the deletion threshold is
+            // surfaced loudly but never aborted.
+            Msg := Format('Sync complete: %d pushed, %d pulled, %d conflicts, %d removed',
+              [Pushed, Pulled, Conflicts, Removed]);
+            DeletedTotal := Removed + TombstonesWritten;
+            Threshold := TDeletionThreshold.Base;
+            if (Snapshot.Count * TDeletionThreshold.Base) div 100 > Threshold then
+              Threshold := (Snapshot.Count * TDeletionThreshold.Base) div 100;
+            if DeletedTotal > Threshold then
+            begin
+              Logger.Warning(Format('Sync: %d deletions in one run (above the usual threshold of %d)',
+                [DeletedTotal, Threshold]));
+              Msg := Msg + Format('; %d deletions (above the warning threshold)', [DeletedTotal]);
+            end;
+            // WP3/WP4: a partial run (anything skipped or deferred) must say so.
             if Deferred > 0 then
-              NotifyComplete(True, Format(
-                'Sync complete: %d pushed, %d pulled, %d conflicts, %d removed; %d deferred to next run',
-                [Pushed, Pulled, Conflicts, Removed, Deferred]))
-            else
-              NotifyComplete(True, Format(
-                'Sync complete: %d pushed, %d pulled, %d conflicts, %d removed',
-                [Pushed, Pulled, Conflicts, Removed]));
+              Msg := Msg + Format('; %d deferred to next run', [Deferred]);
+            NotifyComplete(True, Msg);
           end;
         finally
           RemoteSet.Free;
         end;
       finally
+        PendingTombstones.Free;
+        ResolvedDeletions.Free;
         CreatedGuids.Free;
+        PushedRevs.Free;
         AppliedPulls.Free;
         DeferredGuids.Free;
         Snapshot.Free;
@@ -901,6 +1428,7 @@ begin
         FLastRunSummary.Pulled := Pulled;
         FLastRunSummary.Created := Created;
         FLastRunSummary.Removed := Removed;
+        FLastRunSummary.TombstonesWritten := TombstonesWritten;
         FLastRunSummary.Conflicts := Conflicts;
         FLastRunSummary.Deferred := Deferred;
         Logger.Info('Sync cancelled');
@@ -917,6 +1445,7 @@ begin
         FLastRunSummary.Pulled := Pulled;
         FLastRunSummary.Created := Created;
         FLastRunSummary.Removed := Removed;
+        FLastRunSummary.TombstonesWritten := TombstonesWritten;
         FLastRunSummary.Conflicts := Conflicts;
         FLastRunSummary.Deferred := Deferred;
         Logger.Error('Sync failed: ' + E.Message);
