@@ -1215,3 +1215,25 @@ Two precision tests added to `tests/Models/TBackupServiceTests.pas`:
 | 3 | Automated Test Suite (`StickyNotes.Tests.exe`, APPDATA redirected) | **PASS** - **307 Found / 307 Passed / 0 Failed / 0 Errored / 0 Leaked / 0 Ignored** (292 baseline + 15 new) |
 | 4 | Thread-safety audit | **PASS** - no new worker access to live notes; run accounting written only by the run thread at its exit points |
 | 5 | Design consistency audit | **PASS** - baseline-from-applied-only, deferred freeze, journal preservation, WP1 CAS boundary and WP2 infrastructure reuse verified; empty-store safety remains deferred to WP5 (reported, not silently changed) |
+
+## Phase 7G - Sync Hardening (review 2026-09-28) - WP4: Sync Metadata Persistence Hardening - COMPLETE + VALIDATED (2026-09-28)
+
+> **Status:** **COMPLETE + VALIDATED** - WP4 of the Phase 7G sync-hardening work (design: [PHASE_7G_RECONCILE_DESIGN.md](PHASE_7G_RECONCILE_DESIGN.md); implementation commit 3a3878c). `sync-state.json` and `sync-journal.json` are written through a hardened atomic path: uniquely named temp file in the target folder, explicit flush, close, then MoveFileEx replace - the target is always either the old valid file or the new valid file, and any failure leaves the previous metadata untouched. Metadata persistence failures are distinguishable from operation failures (new `MetadataFailed` run-summary flag; the run is never reported as fully synchronized). Corrupt files still fail loudly and are never reset; the v1->v2 migration stays journal-first and is now failure-tested end to end.
+
+### What Changed
+
+- **`uAtomicFile.pas`**: unique temp names (`<target>.tmp.<pid>.<seq>`), `FlushFileBuffers` before the replace, best-effort cleanup of stale temp residue on the next write to the same target (never read, never promoted), and a defensive JSON well-formedness guard (`AssureValidJsonText`).
+- **`uSyncState.pas` / `uSyncJournal.pas`**: the serialized document is validated before it is handed to the writer (WP4 S13); behavior otherwise unchanged.
+- **`uSyncEngine.pas`**: `TSyncRunSummary.MetadataFailed` marks "operations completed, metadata write lost" runs; the state save is wrapped so this failure mode is distinguishable and the run still reports failed with the old metadata preserved.
+- **`tests/Models/TSyncPersistenceHardeningTests.pas`** (new, 16 tests): atomic round trips; write/replace failures keep the previous valid file byte-identical; temp residue cleanup and stale-temp safety; corrupt state/journal preservation; migration journal-write and state-write failure ordering plus retry without duplicate tombstones; metadata-failure distinguishability; WP3 baseline semantics regression; repeated save/fail/save cycles.
+- Not introduced, with rationale: `.bak` files (atomic replacement already guarantees old-or-new validity, and a backup fallback risks promoting stale metadata - the brief's S12 discretion applied), and no production test seams (failure injection uses OS semantics: read-only targets / missing directories).
+
+### Validation Results (2026-09-28)
+
+| # | Check | Result |
+|---|-------|--------|
+| 1 | Main build (`build.bat`) | **PASS** - 0 errors (55768 lines) |
+| 2 | Test build (`build_tests.bat`) | **PASS** - 0 errors |
+| 3 | Automated Test Suite (`StickyNotes.Tests.exe`, APPDATA redirected) | **PASS** - **323 Found / 323 Passed / 0 Failed / 0 Errored / 0 Leaked / 0 Ignored** (307 baseline + 16 new) |
+| 4 | Thread/lifecycle audit | **PASS** - no new worker access to live notes; shutdown order (Cancel -> WaitForIdle -> flush -> settings -> Finalize) intact; writers serialized (journal lock / single state writer) |
+| 5 | Documented limitations | No multi-file transaction (crash consistency via journal-first ordering); flush/close and serializer-output failures cannot be forced in tests (documented; the guard itself is unit-tested) |
