@@ -35,6 +35,11 @@ unit uSyncEngine;
 // v1 files migrate once into the journal) and local deletions are recorded
 // durably in sync-journal.json via RecordLocalDeletion (the journal is loaded
 // on the main thread before each run).
+//
+// Phase 7G/WP3: the synced baseline is reconstructed strictly from completed
+// operations (pushed / pulled / created / verified-unchanged); deferred or
+// failed work keeps its previous baseline and is retried, and LastRunSummary
+// exposes per-run accounting for tests and WP5.
 
 interface
 
@@ -66,6 +71,22 @@ type
     Height: Integer;
   end;
 
+  // WP3: accounting for one sync run. Counts include only operations that
+  // actually completed; Deferred counts operations skipped for the next run
+  // (they never advance the baseline). Succeeded means the run finished
+  // without an abort (deferrals are allowed); Cancelled marks a run stopped
+  // by ISyncService.Cancel.
+  TSyncRunSummary = record
+    Succeeded: Boolean;
+    Cancelled: Boolean;
+    Pushed: Integer;     // local payloads accepted by the backend
+    Pulled: Integer;     // remote payloads applied locally
+    Created: Integer;    // of Pulled: notes newly created locally
+    Removed: Integer;    // local deletions propagated to the backend
+    Conflicts: Integer;  // conflict resolutions performed
+    Deferred: Integer;   // operations skipped for the next run
+  end;
+
   TSyncEngine = class(TInterfacedObject, ISyncService)
   private
     FNoteManager: INoteManager;
@@ -82,6 +103,8 @@ type
     // more than one thread, always via TInterlocked.
     FSyncActive: Integer;      // 0 = idle, 1 = a run is in flight
     FCancelRequested: Integer; // 0 = normal, 1 = stop at the next checkpoint
+    // WP3: accounting for the most recent run (zeroed when a run starts).
+    FLastRunSummary: TSyncRunSummary;
     function GetOnProgress: TSyncProgress;
     procedure SetOnProgress(const Value: TSyncProgress);
     function GetOnComplete: TSyncComplete;
@@ -134,6 +157,9 @@ type
       const ACreate: TProc): TSyncApplyResult;
     property OnProgress: TSyncProgress read GetOnProgress write SetOnProgress;
     property OnComplete: TSyncComplete read GetOnComplete write SetOnComplete;
+    // Phase 7G/WP3: accounting for the most recent run. Written by the run
+    // thread; read it after SyncNow returns (or after WaitForIdle).
+    property LastRunSummary: TSyncRunSummary read FLastRunSummary;
   end;
 
 implementation
@@ -503,6 +529,7 @@ var
   RemoteSet: TDictionary<string, Boolean>;
   DeferredGuids: TDictionary<string, Boolean>;
   AppliedPulls: TDictionary<string, Int64>;
+  CreatedGuids: TDictionary<string, Int64>; // WP3: guid -> applied remote rev
   NewSynced: TDictionary<string, Int64>;
   RemoteNames: TArray<string>;
   Guid, Payload, RemoteETag: string;
@@ -510,7 +537,7 @@ var
   Snap: TSyncNoteSnapshot;
   RemoteNote: TNote;
   LocalRev, RemoteRev, AppliedRev, PreviousRev: Int64;
-  Pushed, Pulled, Conflicts, Removed, Deferred: Integer;
+  Pushed, Pulled, Created, Conflicts, Removed, Deferred: Integer;
   ApplyResult: TSyncApplyResult;
   Logger: ILogger;
 
@@ -528,6 +555,10 @@ var
 begin
   Result := False;
   Logger := CreateLogger;
+  // WP3: zero the counters up front so the run accounting is meaningful on
+  // every exit path (success, cancellation, failure).
+  Pushed := 0; Pulled := 0; Created := 0; Conflicts := 0; Removed := 0; Deferred := 0;
+  FLastRunSummary := Default(TSyncRunSummary);
   if FBackend = nil then
   begin
     NotifyComplete(False, 'Sync is not configured');
@@ -545,10 +576,10 @@ begin
   try
     try
       ClearCancel;
-      Pushed := 0; Pulled := 0; Conflicts := 0; Removed := 0; Deferred := 0;
       Snapshot := TDictionary<string, TSyncNoteSnapshot>.Create;
       DeferredGuids := TDictionary<string, Boolean>.Create;
       AppliedPulls := TDictionary<string, Int64>.Create;
+      CreatedGuids := TDictionary<string, Int64>.Create;
       try
         UseETags := FBackend.SupportsETags;
         LoadJournalOnMainThread; // main-thread parse (WP2 S16); fails the run if unreadable
@@ -619,7 +650,15 @@ begin
                     FNoteManager.PersistNote(Created);
                   end);
                 case ApplyResult of
-                  arApplied: Inc(Pulled);
+                  arApplied:
+                    begin
+                      // WP3: a created note is an applied operation - its
+                      // baseline advances to the applied remote revision
+                      // (design S2.4).
+                      Inc(Pulled);
+                      Inc(Created);
+                      CreatedGuids.AddOrSetValue(Guid, RemoteRev);
+                    end;
                   arCancelled: raise ESyncCancelled.Create('Sync run cancelled');
                 else
                   Inc(Deferred);
@@ -770,10 +809,10 @@ begin
             end;
           end;
 
-          // Record the new synced baseline. Only revisions that were actually
-          // pushed/pulled/applied are recorded; a deferred or skipped note
-          // keeps its previous baseline so the next run re-evaluates it -
-          // never a re-read of the live note (WP1 design, S6).
+          // Record the new synced baseline: previous baseline + operations
+          // that actually completed this run. Deferred or skipped notes keep
+          // their previous baseline so the next run re-evaluates them - never
+          // a re-read of the live note (WP3 design S17).
           NewSynced := TDictionary<string, Int64>.Create;
           try
             for Snap in Snapshot.Values do
@@ -788,6 +827,10 @@ begin
               else
                 NewSynced.AddOrSetValue(Snap.Guid, Snap.Rev);
             end;
+            // WP3: notes created from the remote are applied operations too -
+            // their baseline advances to the applied remote revision.
+            for Guid in CreatedGuids.Keys do
+              NewSynced.AddOrSetValue(Guid, CreatedGuids[Guid]);
             FSynced.Free;
             FSynced := NewSynced;
             NewSynced := nil;
@@ -798,6 +841,16 @@ begin
           SaveState;
           Report('Sync complete', 100);
           Result := True;
+          // WP3: publish the run accounting - only completed operations are in
+          // these counts; deferred ones are counted separately.
+          FLastRunSummary.Succeeded := True;
+          FLastRunSummary.Cancelled := False;
+          FLastRunSummary.Pushed := Pushed;
+          FLastRunSummary.Pulled := Pulled;
+          FLastRunSummary.Created := Created;
+          FLastRunSummary.Removed := Removed;
+          FLastRunSummary.Conflicts := Conflicts;
+          FLastRunSummary.Deferred := Deferred;
           Logger.Info(Format('Sync: pushed %d, pulled %d, conflicts %d, removed %d, deferred %d',
             [Pushed, Pulled, Conflicts, Removed, Deferred]));
           if Assigned(FOnComplete) then
@@ -816,6 +869,7 @@ begin
           RemoteSet.Free;
         end;
       finally
+        CreatedGuids.Free;
         AppliedPulls.Free;
         DeferredGuids.Free;
         Snapshot.Free;
@@ -823,14 +877,34 @@ begin
     except
       on E: ESyncCancelled do
       begin
-        // Distinct cancellation outcome; no state was written, so the next run
-        // picks up whatever is still pending.
+        // Distinct cancellation outcome; no state was written (design S6), so
+        // the next run picks up whatever is still pending. Completed
+        // operations already live in the local/remote stores and are
+        // re-conciled - and only then recorded - by that next run.
+        FLastRunSummary.Succeeded := False;
+        FLastRunSummary.Cancelled := True;
+        FLastRunSummary.Pushed := Pushed;
+        FLastRunSummary.Pulled := Pulled;
+        FLastRunSummary.Created := Created;
+        FLastRunSummary.Removed := Removed;
+        FLastRunSummary.Conflicts := Conflicts;
+        FLastRunSummary.Deferred := Deferred;
         Logger.Info('Sync cancelled');
         NotifyComplete(False, 'Sync cancelled');
         Result := False;
       end;
       on E: Exception do
       begin
+        // The run aborted: nothing is saved, and the affected operations have
+        // not advanced the baseline (the state file is left untouched).
+        FLastRunSummary.Succeeded := False;
+        FLastRunSummary.Cancelled := False;
+        FLastRunSummary.Pushed := Pushed;
+        FLastRunSummary.Pulled := Pulled;
+        FLastRunSummary.Created := Created;
+        FLastRunSummary.Removed := Removed;
+        FLastRunSummary.Conflicts := Conflicts;
+        FLastRunSummary.Deferred := Deferred;
         Logger.Error('Sync failed: ' + E.Message);
         NotifyComplete(False, 'Sync failed: ' + E.Message);
         Result := False;

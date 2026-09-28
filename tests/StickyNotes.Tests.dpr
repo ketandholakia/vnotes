@@ -34,7 +34,8 @@ uses
   TSyncIntegrationTests in 'Models\TSyncIntegrationTests.pas',
   TSyncFoundationTests in 'Models\TSyncFoundationTests.pas',
   TSyncPersistenceTests in 'Models\TSyncPersistenceTests.pas',
-  TSyncDeletionTests in 'Models\TSyncDeletionTests.pas';
+  TSyncDeletionTests in 'Models\TSyncDeletionTests.pas',
+  TSyncBaselineTests in 'Models\TSyncBaselineTests.pas';
 
 var
   runner: ITestRunner;
