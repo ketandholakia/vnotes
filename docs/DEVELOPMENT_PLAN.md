@@ -1172,3 +1172,27 @@ Two precision tests added to `tests/Models/TBackupServiceTests.pas`:
 | 4 | Thread-safety audit (live `TNote` access in the sync path) | **PASS** - main-thread snapshot / main-thread CAS only; no worker-side access to live notes; no `Touch`/`SaveNote` in the engine |
 | 5 | Git diff check (`git diff --check`) | **PASS** - clean |
 | 6 | Production/data safety | **PASS** - reconcile semantics and `sync-state.json` format unchanged; tests ran against temp sandboxes; live `%APPDATA%\StickyNotes` untouched |
+
+## Phase 7G - Sync Hardening (review 2026-09-28) - WP2: Tombstone Journal + Sync-State v2 - COMPLETE + VALIDATED (2026-09-28)
+
+> **Status:** **COMPLETE + VALIDATED** - WP2 of the Phase 7G sync-hardening work (design: [PHASE_7G_RECONCILE_DESIGN.md](PHASE_7G_RECONCILE_DESIGN.md); implementation commit 15e3113). Local deletions are now durable in `sync-journal.json`, recorded at the moment a deletion actually happened (never for failed or repeated attempts), and `sync-state.json` is version 2 (`{"version":2,"synced":...}`) with a one-time, journal-first v1 migration of the old deleted list. Corrupt or unsupported sync metadata now fails loudly and is preserved instead of being silently reset; both files are written atomically (`uAtomicFile`). Reconcile semantics are unchanged - WP5 consumes the journal for tombstone propagation.
+
+### What Changed
+
+- **`uSyncJournal.pas`** (new): the lock-protected tombstone journal for `sync-journal.json` (`{"version":1,"deletions":{guid:{rev,deletedAt}}}`): Load / Save / Add / TryGet / Remove / Count / Enumerate; Save refuses after a failed Load; entries are validated on load (unusable guids dropped with a Warning; unknown revs/timestamps kept as 0); `IsTombstoneExpired` implements the approved 90-day retention calculation (no GC is performed).
+- **`uSyncState.pas`** (new): v2 read/write and the one-time v1 -> v2 migration (deleted list -> journal tombstones; rev from `synced` or 0 = unknown; deletedAt = migration time). The journal is written before the state rewrite, so a crash in between simply re-migrates - nothing is lost silently. Invalid JSON / unsupported versions raise and leave both files untouched.
+- **`uAtomicFile.pas`** (new): the smallest atomic text writer (temp file in place, flush, `MoveFileEx(MOVEFILE_REPLACE_EXISTING or MOVEFILE_WRITE_THROUGH)`); WP4 extends it with `.bak` handling. Used by both the state and the journal.
+- **`uSyncEngine.pas`**: journal lifecycle (`FJournal` next to the state file; loaded on the main thread before each run - a load failure aborts the run without writing state); `RecordLocalDeletion` records a deletion durably the moment it happens; state load/save moved onto the new helpers. The in-memory `FDeleted` guard set keeps working but is no longer serialized (its in-file role has moved to the journal).
+- **`uNoteApplication.pas`**: `OnNoteDeleted` is wired in the constructor to the journal hook (record, then forward), so the canonical deletion pathway is active without `Initialize`.
+- **`uServiceInterfaces.pas` / `uIdentity.pas`**: `ISyncService.RecordLocalDeletion`; `IsValidNoteGuid` (canonical 8-4-4-4-12 lowercase-hex shape).
+- **Tests**: `TSyncPersistenceTests.pas` (10 tests) + `TSyncDeletionTests.pas` (3 tests), registered in `tests/StickyNotes.Tests.dpr`; the scheduler stub was extended.
+
+### Validation Results (2026-09-28)
+
+| # | Check | Result |
+|---|-------|--------|
+| 1 | Main build (`build.bat`) | **PASS** - 0 errors (55606 lines) |
+| 2 | Test build (`build_tests.bat`) | **PASS** - 0 errors |
+| 3 | Automated Test Suite (`StickyNotes.Tests.exe`, APPDATA redirected) | **PASS** - **292 Found / 292 Passed / 0 Failed / 0 Errored / 0 Leaked / 0 Ignored** (279 baseline + 13 new) |
+| 4 | Thread-safety audit (journal/state/note access) | **PASS** - journal lock-protected; journal parsed on the main thread before reconcile; no new worker access to application-owned objects |
+| 5 | Data safety | **PASS** - corrupt/unsupported metadata raises and is preserved; migration is journal-first and idempotent; live `%APPDATA%\StickyNotes` untouched (temp sandboxes) |
