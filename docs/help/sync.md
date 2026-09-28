@@ -40,9 +40,11 @@ the same note across the office PC's screen.
 
 ## How conflicts are handled
 
-If the same note is edited on two machines, the conflict is resolved by **revision**: the higher
-revision wins overall, and **the losing version is never thrown away** — it is kept as a
-**conflict copy** (its title gets a `(conflict from …)` suffix).
+If the same note is edited on two machines before they sync, the versions are compared by
+**revision** (then by device, then by content): the higher revision wins overall, and **the
+losing version is never thrown away** — it is kept as a **conflict copy** with a deterministic
+identity, so both machines end up with exactly the same copy (its title gets a
+`(conflict from …)` suffix). Repeated syncs never create a second copy.
 
 To resolve them: tray menu → **Sync conflicts…**. For each copy you can:
 
@@ -53,8 +55,11 @@ The tray item shows the number of unresolved conflicts, e.g. *Sync conflicts (2)
 
 ## Deletions
 
-Deleting a note on one machine removes it on the others the next time they sync — deleted notes
-do not come back.
+Deleting a note on one machine removes it on the others the next time they sync — the deletion
+is recorded durably (in `sync-journal.json`) the moment it happens and propagates as a small
+*tombstone*, so deleted notes do not come back. If the note was **edited on another machine
+before it learned of the deletion**, the edit wins: the note returns with that edit. Sync never
+deletes a note merely because it is missing from one machine's local files.
 
 ## Security — please read
 
@@ -73,8 +78,9 @@ Objects are written one file per note into a `notes` sub-folder of the sync loca
 ```
 
 The file name is a globally unique note id (not a local number) precisely so two machines can
-never collide. A small `sync-state.json` in your profile records what has been synced, and
-`device.id` identifies this installation.
+never collide. A small `sync-state.json` in your profile records what has been synced,
+`sync-journal.json` records local deletions that still need to propagate, and `device.id`
+identifies this installation.
 
 ## Limitations
 

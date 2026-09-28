@@ -1237,3 +1237,23 @@ Two precision tests added to `tests/Models/TBackupServiceTests.pas`:
 | 3 | Automated Test Suite (`StickyNotes.Tests.exe`, APPDATA redirected) | **PASS** - **323 Found / 323 Passed / 0 Failed / 0 Errored / 0 Leaked / 0 Ignored** (307 baseline + 16 new) |
 | 4 | Thread/lifecycle audit | **PASS** - no new worker access to live notes; shutdown order (Cancel -> WaitForIdle -> flush -> settings -> Finalize) intact; writers serialized (journal lock / single state writer) |
 | 5 | Documented limitations | No multi-file transaction (crash consistency via journal-first ordering); flush/close and serializer-output failures cannot be forced in tests (documented; the guard itself is unit-tested) |
+
+## Phase 7G - Sync Hardening (review 2026-09-28) - WP5: Reconcile Decision Rewrite - COMPLETE + VALIDATED (2026-09-28)
+
+> **Status:** **COMPLETE + VALIDATED** - WP5 of the Phase 7G sync-hardening work (design: [PHASE_7G_RECONCILE_DESIGN.md](PHASE_7G_RECONCILE_DESIGN.md); implementation commit b13a70d). The reconcile engine now implements the approved decision matrix (design S2/S3): deletion-by-absence is gone (absence never deletes), conflicts resolve by the deterministic winner rule (Rev, then DeviceId, then content hash) with a deterministic conflict copy, deletions propagate as durable tombstones (journal -> tombstone; edit beats delete), and equal-content revisions align upward. The decision for one guid is a pure function (`ReconcileDecision`, directly unit-tested); repeated syncs reach a fixed point that writes nothing. Empty-store safety (pull back, never mass-delete), the warn-only >25-deletions threshold, and the design's empty-store log warning are implemented.
+
+### What Changed
+
+- **`uSyncEngine.pas`**: `TReconcileInput`/`TSyncDecision` + the pure `ReconcileDecision` (8 decision kinds); the executor applies decisions strictly through the WP1 snapshot/CAS boundary; tombstones are written/cleared per the S4 lifecycle; conflict copies use the deterministic `SHA256(guid|loserDeviceId|loserRev)` identity; the legacy `FDeleted` set, absence-inference and random-guid copies are removed; tombstone authorship uses `device.id`; the run summary gains `TombstonesWritten`.
+- **Tests**: `TSyncReconcileTests.pas` (T1-T9 + empty-store + deletion-threshold + republish; two-device shared-store fixture with a write-counting backend), `TSyncDecisionTests.pas` (pure decision determinism, role-swap symmetry, tie-break order, matrix rows); deliberate updates to tests that encoded the old remove-on-delete behavior: `TSyncEngineTests.TestLocalDeletionIsPropagatedAndNotResurrected` (now asserts the tombstone), `TSyncFoundationTests.TestCancellationStopsTheRun` (seeded baseline), `TSyncBaselineTests` deletion/tombstone tests (deferral + tombstone semantics), and the WP3 metadata-failure test (directory-as-target injection).
+- **Docs**: `docs/help/sync.md` (conflict + deletion wording: tombstones, deterministic copies, "an edit made before the other side learns of the deletion wins"). ARCHITECTURE.md has no sync section, so nothing to update there.
+
+### Validation Results (2026-09-28)
+
+| # | Check | Result |
+|---|-------|--------|
+| 1 | Main build (`build.bat`) | **PASS** - 0 errors (56297 lines) |
+| 2 | Test build (`build_tests.bat`) | **PASS** - 0 errors |
+| 3 | Automated Test Suite (`StickyNotes.Tests.exe`, APPDATA redirected) | **PASS** - **342 Found / 342 Passed / 0 Failed / 0 Errored / 0 Leaked / 0 Ignored** (323 baseline + 13 T-suite + 6 decision tests) |
+| 4 | Pre-fix evidence (before the rewrite) | T1-T7, T9 and the threshold tests **FAILED** on the old engine (325/336 passed); T8 and the no-delete regression passed; after the rewrite all T1-T9 pass |
+| 5 | Thread-safety / purity audit | **PASS** - no worker access to live notes; `ReconcileDecision` is pure (no I/O, randomness, clock or order dependence); no old absence/conflict path remains reachable |
